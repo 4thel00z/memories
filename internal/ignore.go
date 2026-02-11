@@ -13,16 +13,13 @@ const IgnoreFilename = ".memignore"
 
 type IgnoreMatcher struct {
 	patterns []gitignore.Pattern
-	basePath string
 }
 
-func NewIgnoreMatcher(basePath string) (*IgnoreMatcher, error) {
-	m := &IgnoreMatcher{
-		basePath: basePath,
-	}
+func NewIgnoreMatcher(scope Scope) (*IgnoreMatcher, error) {
+	m := &IgnoreMatcher{}
 
-	ignorePath := filepath.Join(basePath, IgnoreFilename)
-	patterns, err := parseIgnoreFile(ignorePath, basePath)
+	ignorePath := filepath.Join(scope.Path, IgnoreFilename)
+	patterns, err := parseIgnoreFile(ignorePath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -31,39 +28,20 @@ func NewIgnoreMatcher(basePath string) (*IgnoreMatcher, error) {
 	return m, nil
 }
 
-func (m *IgnoreMatcher) Match(path string) bool {
-	relPath, err := filepath.Rel(m.basePath, path)
-	if err != nil {
-		return false
-	}
-
-	pathParts := strings.Split(relPath, string(filepath.Separator))
+// MatchKey returns true if the key should be ignored (blocked from add/edit)
+func (m *IgnoreMatcher) MatchKey(key Key) bool {
+	keyStr := key.String()
+	parts := strings.Split(keyStr, "/")
 
 	for _, p := range m.patterns {
-		if p.Match(pathParts, false) == gitignore.Exclude {
+		if p.Match(parts, false) == gitignore.Exclude {
 			return true
 		}
 	}
 	return false
 }
 
-func (m *IgnoreMatcher) MatchDir(path string) bool {
-	relPath, err := filepath.Rel(m.basePath, path)
-	if err != nil {
-		return false
-	}
-
-	pathParts := strings.Split(relPath, string(filepath.Separator))
-
-	for _, p := range m.patterns {
-		if p.Match(pathParts, true) == gitignore.Exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func parseIgnoreFile(path, basePath string) ([]gitignore.Pattern, error) {
+func parseIgnoreFile(path string) ([]gitignore.Pattern, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
