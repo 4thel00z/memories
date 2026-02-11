@@ -4,6 +4,7 @@ go 1.25
 
 require (
 	github.com/charmbracelet/fang v0.4.3
+	github.com/dianlight/gollama.cpp v0.1.0
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.5
 	github.com/mariotoffia/goannoy v0.0.0-20241203082301-c889abef1805
@@ -26,6 +27,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
+	github.com/ebitengine/purego v0.9.0-alpha.10 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
