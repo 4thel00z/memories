@@ -45,6 +45,16 @@ type Memory struct {
 	UpdatedAt time.Time
 }
 
+func NewMemory(key Key, content []byte) *Memory {
+	now := time.Now().UTC()
+	return &Memory{
+		Key:       key,
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
 type MemoryRepository interface {
 	Get(ctx context.Context, key Key) (*Memory, error)
 	Save(ctx context.Context, mem *Memory) error
