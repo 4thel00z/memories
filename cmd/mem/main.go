@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/4thel00z/memories/internal"
 	"github.com/charmbracelet/fang"
 )
 
@@ -18,7 +19,8 @@ func main() {
 		return
 	}
 
-	rootCmd := NewRootCmd(version)
+	app := newApp()
+	rootCmd := NewRootCmd(version, app)
 	if err := fang.Execute(ctx, rootCmd); err != nil {
 		os.Exit(1)
 	}
@@ -44,4 +46,35 @@ func tryExternalCommand(ctx context.Context) bool {
 	}
 
 	return true
+}
+
+type app struct {
+	resolver     *internal.ScopeResolver
+	memorySvc    *internal.MemoryService
+	historySvc   *internal.HistoryService
+	branchSvc    *internal.BranchService
+	searchSvc    *internal.SearchService
+	summarizeSvc *internal.SummarizeService
+	providerSvc  *internal.ProviderService
+}
+
+func newApp() *app {
+	resolver := internal.NewScopeResolver()
+
+	repoFor := func(scope internal.Scope) (*internal.GitRepository, error) {
+		return internal.NewGitRepository(scope)
+	}
+	indexFor := func(scope internal.Scope) (*internal.AnnoyIndex, error) {
+		return nil, internal.ErrNoIndex
+	}
+
+	return &app{
+		resolver:     resolver,
+		memorySvc:    internal.NewMemoryService(resolver, repoFor, indexFor, nil),
+		historySvc:   internal.NewHistoryService(resolver, repoFor),
+		branchSvc:    internal.NewBranchService(resolver, repoFor),
+		searchSvc:    internal.NewSearchService(resolver, repoFor, indexFor, nil),
+		summarizeSvc: internal.NewSummarizeService(resolver, repoFor, nil),
+		providerSvc:  internal.NewProviderService(resolver),
+	}
 }

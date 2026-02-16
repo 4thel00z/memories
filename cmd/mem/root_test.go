@@ -5,7 +5,7 @@ import (
 )
 
 func TestNewRootCmd(t *testing.T) {
-	cmd := NewRootCmd("1.0.0")
+	cmd := NewRootCmd("1.0.0", nil)
 
 	if cmd == nil {
 		t.Fatal("NewRootCmd returned nil")
@@ -21,7 +21,7 @@ func TestNewRootCmd(t *testing.T) {
 }
 
 func TestRootCmdHasFlags(t *testing.T) {
-	cmd := NewRootCmd("1.0.0")
+	cmd := NewRootCmd("1.0.0", nil)
 
 	flags := []string{"scope", "branch", "json"}
 	for _, name := range flags {
@@ -36,7 +36,7 @@ func TestRootCmdVersion(t *testing.T) {
 	versions := []string{"dev", "1.0.0", "2.3.4-beta"}
 
 	for _, v := range versions {
-		cmd := NewRootCmd(v)
+		cmd := NewRootCmd(v, nil)
 		if cmd.Version != v {
 			t.Errorf("expected version %q, got %q", v, cmd.Version)
 		}
