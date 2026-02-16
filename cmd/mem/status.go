@@ -7,27 +7,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewStatusCmd(branch func() *internal.BranchService) *cobra.Command {
+func NewStatusCmd(currentUC *internal.BranchCurrentUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show working tree status",
 		Long:  `Show the current branch and any uncommitted changes.`,
-		RunE:  makeStatusRunner(branch),
+		RunE:  makeStatusRunner(currentUC),
 	}
 
 	return cmd
 }
 
-func makeStatusRunner(branch func() *internal.BranchService) func(*cobra.Command, []string) error {
+func makeStatusRunner(currentUC *internal.BranchCurrentUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		scopeHint, _ := cmd.Flags().GetString("scope")
 
-		current, err := branch().Current(cmd.Context(), scopeHint)
+		out, err := currentUC.Execute(cmd.Context(), internal.BranchInput{
+			Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("get current branch: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "On branch %s\n", current.Name)
+		fmt.Fprintf(cmd.OutOrStdout(), "On branch %s\n", out.Name)
 		return nil
 	}
 }

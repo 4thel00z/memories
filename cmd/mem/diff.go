@@ -7,19 +7,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewDiffCmd(hist func() *internal.HistoryService) *cobra.Command {
+func NewDiffCmd(diffUC *internal.DiffUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff [ref]",
 		Short: "Show changes",
 		Long:  `Show uncommitted changes or diff against a specific ref.`,
 		Args:  cobra.MaximumNArgs(1),
-		RunE:  makeDiffRunner(hist),
+		RunE:  makeDiffRunner(diffUC),
 	}
 
 	return cmd
 }
 
-func makeDiffRunner(hist func() *internal.HistoryService) func(*cobra.Command, []string) error {
+func makeDiffRunner(diffUC *internal.DiffUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		ref := ""
 		if len(args) > 0 {
@@ -28,17 +28,19 @@ func makeDiffRunner(hist func() *internal.HistoryService) func(*cobra.Command, [
 
 		scopeHint, _ := cmd.Flags().GetString("scope")
 
-		diff, err := hist().Diff(cmd.Context(), ref, scopeHint)
+		out, err := diffUC.Execute(cmd.Context(), internal.DiffInput{
+			Ref: ref, Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("get diff: %w", err)
 		}
 
-		if diff == "" {
+		if out.Diff == "" {
 			fmt.Fprintln(cmd.OutOrStdout(), "No changes.")
 			return nil
 		}
 
-		fmt.Fprint(cmd.OutOrStdout(), diff)
+		fmt.Fprint(cmd.OutOrStdout(), out.Diff)
 		return nil
 	}
 }

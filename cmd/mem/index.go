@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewIndexCmd(search func() *internal.SearchService) *cobra.Command {
+func NewIndexCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "index",
 		Short: "Manage the vector search index",
@@ -15,14 +15,14 @@ func NewIndexCmd(search func() *internal.SearchService) *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		newIndexRebuildCmd(search),
-		newIndexStatusCmd(search),
+		newIndexRebuildCmd(rebuildUC),
+		newIndexStatusCmd(),
 	)
 
 	return cmd
 }
 
-func newIndexRebuildCmd(search func() *internal.SearchService) *cobra.Command {
+func newIndexRebuildCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rebuild",
 		Short: "Rebuild the search index",
@@ -30,7 +30,9 @@ func newIndexRebuildCmd(search func() *internal.SearchService) *cobra.Command {
 			scopeHint, _ := cmd.Flags().GetString("scope")
 			trees, _ := cmd.Flags().GetInt("trees")
 
-			if err := search().RebuildIndex(cmd.Context(), scopeHint, trees); err != nil {
+			if err := rebuildUC.Execute(cmd.Context(), internal.RebuildIndexInput{
+				Scope: scopeHint, NumTrees: trees,
+			}); err != nil {
 				return fmt.Errorf("rebuild index: %w", err)
 			}
 
@@ -43,7 +45,7 @@ func newIndexRebuildCmd(search func() *internal.SearchService) *cobra.Command {
 	return cmd
 }
 
-func newIndexStatusCmd(search func() *internal.SearchService) *cobra.Command {
+func newIndexStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show index status",

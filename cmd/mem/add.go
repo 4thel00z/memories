@@ -9,20 +9,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewAddCmd(svc func() *internal.MemoryService, hist func() *internal.HistoryService) *cobra.Command {
+func NewAddCmd(addUC *internal.AddMemoryUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <key> [content]",
 		Short: "Append content to a memory",
 		Long:  `Append content to an existing memory or create a new one. Reads from stdin if content is not provided.`,
 		Args:  cobra.RangeArgs(1, 2),
-		RunE:  makeAddRunner(svc, hist),
+		RunE:  makeAddRunner(addUC),
 	}
 
 	cmd.Flags().StringP("message", "m", "", "Commit message")
 	return cmd
 }
 
-func makeAddRunner(svc func() *internal.MemoryService, hist func() *internal.HistoryService) func(*cobra.Command, []string) error {
+func makeAddRunner(addUC *internal.AddMemoryUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
@@ -34,31 +34,14 @@ func makeAddRunner(svc func() *internal.MemoryService, hist func() *internal.His
 		scopeHint, _ := cmd.Flags().GetString("scope")
 		message, _ := cmd.Flags().GetString("message")
 
-		existing, err := svc().Get(cmd.Context(), key, scopeHint)
-		if err != nil && err != internal.ErrNotFound {
-			return fmt.Errorf("get existing memory: %w", err)
-		}
-
-		var newContent string
-		if existing != nil {
-			newContent = string(existing.Content) + "\n" + content
-		} else {
-			newContent = content
-		}
-
-		if err := svc().Set(cmd.Context(), key, newContent, scopeHint); err != nil {
+		_, err = addUC.Execute(cmd.Context(), internal.AddMemoryInput{
+			Key: key, Content: content, Scope: scopeHint, Message: message,
+		})
+		if err != nil {
 			return fmt.Errorf("add to memory: %w", err)
 		}
 
-		if err := autoCommit(cmd.Context(), hist(), message, "add", key, scopeHint); err != nil {
-			return fmt.Errorf("commit: %w", err)
-		}
-
-		if existing != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "Appended to %s\n", key)
-		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "Created %s\n", key)
-		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Appended to %s\n", key)
 		return nil
 	}
 }

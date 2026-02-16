@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/4thel00z/memories/internal"
 	"github.com/charmbracelet/fang"
@@ -49,32 +51,101 @@ func tryExternalCommand(ctx context.Context) bool {
 }
 
 type app struct {
-	resolver     *internal.ScopeResolver
-	memorySvc    *internal.MemoryService
-	historySvc   *internal.HistoryService
-	branchSvc    *internal.BranchService
-	searchSvc    *internal.SearchService
-	summarizeSvc *internal.SummarizeService
-	providerSvc  *internal.ProviderService
+	resolver *internal.ScopeResolver
+	uc       *internal.UseCases
 }
 
 func newApp() *app {
 	resolver := internal.NewScopeResolver()
 
-	repoFor := func(scope internal.Scope) (*internal.GitRepository, error) {
+	repoFor := func(scope internal.Scope) (internal.MemoryRepository, error) {
 		return internal.NewGitRepository(scope)
 	}
-	indexFor := func(scope internal.Scope) (*internal.AnnoyIndex, error) {
-		return nil, internal.ErrNoIndex
+	histFor := func(scope internal.Scope) (internal.HistoryRepository, error) {
+		return internal.NewGitRepository(scope)
+	}
+	branchFor := func(scope internal.Scope) (internal.BranchRepository, error) {
+		return internal.NewGitRepository(scope)
+	}
+
+	// Lazy embedder + index initialization (only loaded on first use)
+	var (
+		embedderOnce sync.Once
+		embedder     internal.Embedder
+	)
+
+	lazyEmbedder := func() internal.Embedder {
+		embedderOnce.Do(func() {
+			cacheDir, err := internal.DefaultCacheDir()
+			if err != nil {
+				slog.Warn("failed to get cache dir for embedder", "error", err)
+				return
+			}
+
+			dl := internal.NewDownloader(cacheDir)
+			modelPath, err := dl.EnsureModel(context.Background(),
+				internal.DefaultModelURL, internal.DefaultModelFilename, nil)
+			if err != nil {
+				slog.Warn("failed to download embedding model", "error", err)
+				return
+			}
+
+			e, err := internal.NewLocalEmbedder(modelPath, 0)
+			if err != nil {
+				slog.Warn("failed to initialize embedder", "error", err)
+				return
+			}
+
+			embedder = e
+		})
+		return embedder
+	}
+
+	indexFor := func(scope internal.Scope) (internal.VectorIndex, error) {
+		e := lazyEmbedder()
+		if e == nil {
+			return nil, internal.ErrNoIndex
+		}
+		idx, err := internal.NewAnnoyIndex(scope.VectorPath(), e.Dimension())
+		if err != nil {
+			return nil, err
+		}
+		if err := idx.Load(context.Background()); err != nil {
+			slog.Warn("failed to load index", "error", err)
+		}
+		return idx, nil
+	}
+
+	uc := &internal.UseCases{
+		SetMemory:      internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, lazyEmbedder(), nil),
+		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
+		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, indexFor),
+		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
+		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, indexFor, lazyEmbedder(), nil),
+		EditMemory:     internal.NewEditMemoryUseCase(resolver, repoFor, histFor, indexFor, lazyEmbedder(), nil),
+		Commit:         internal.NewCommitUseCase(resolver, histFor),
+		Log:            internal.NewLogUseCase(resolver, histFor),
+		Diff:           internal.NewDiffUseCase(resolver, histFor),
+		Revert:         internal.NewRevertUseCase(resolver, histFor),
+		KeywordSearch:  internal.NewKeywordSearchUseCase(resolver, repoFor),
+		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, indexFor, lazyEmbedder()),
+		RebuildIndex:   internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, lazyEmbedder()),
+		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, nil),
+		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, nil),
+		BranchCurrent:  internal.NewBranchCurrentUseCase(resolver, branchFor),
+		BranchList:     internal.NewBranchListUseCase(resolver, branchFor),
+		BranchCreate:   internal.NewBranchCreateUseCase(resolver, branchFor),
+		BranchSwitch:   internal.NewBranchSwitchUseCase(resolver, branchFor),
+		BranchDelete:   internal.NewBranchDeleteUseCase(resolver, branchFor),
+		ProviderList:   internal.NewProviderListUseCase(resolver),
+		ProviderAdd:    internal.NewProviderAddUseCase(resolver),
+		ProviderRemove: internal.NewProviderRemoveUseCase(resolver),
+		ProviderSetDef: internal.NewProviderSetDefaultUseCase(resolver),
+		ProviderTest:   internal.NewProviderTestUseCase(resolver),
 	}
 
 	return &app{
-		resolver:     resolver,
-		memorySvc:    internal.NewMemoryService(resolver, repoFor, indexFor, nil),
-		historySvc:   internal.NewHistoryService(resolver, repoFor),
-		branchSvc:    internal.NewBranchService(resolver, repoFor),
-		searchSvc:    internal.NewSearchService(resolver, repoFor, indexFor, nil),
-		summarizeSvc: internal.NewSummarizeService(resolver, repoFor, nil),
-		providerSvc:  internal.NewProviderService(resolver),
+		resolver: resolver,
+		uc:       uc,
 	}
 }

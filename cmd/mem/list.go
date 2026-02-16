@@ -8,20 +8,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewListCmd(svc func() *internal.MemoryService) *cobra.Command {
+func NewListCmd(listUC *internal.ListMemoriesUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list [prefix]",
 		Aliases: []string{"ls"},
 		Short:   "List memories",
 		Long:    `List all memories, optionally filtered by prefix.`,
 		Args:    cobra.MaximumNArgs(1),
-		RunE:    makeListRunner(svc),
+		RunE:    makeListRunner(listUC),
 	}
 
 	return cmd
 }
 
-func makeListRunner(svc func() *internal.MemoryService) func(*cobra.Command, []string) error {
+func makeListRunner(listUC *internal.ListMemoriesUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		prefix := ""
 		if len(args) > 0 {
@@ -31,27 +31,29 @@ func makeListRunner(svc func() *internal.MemoryService) func(*cobra.Command, []s
 		scopeHint, _ := cmd.Flags().GetString("scope")
 		asJSON, _ := cmd.Flags().GetBool("json")
 
-		memories, err := svc().List(cmd.Context(), prefix, scopeHint)
+		out, err := listUC.Execute(cmd.Context(), internal.ListMemoriesInput{
+			Prefix: prefix, Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("list memories: %w", err)
 		}
 
 		if asJSON {
-			return outputMemoriesJSON(cmd, memories)
+			return outputListJSON(cmd, out)
 		}
 
-		for _, mem := range memories {
-			fmt.Fprintln(cmd.OutOrStdout(), mem.Key.String())
+		for _, mem := range out.Memories {
+			fmt.Fprintln(cmd.OutOrStdout(), mem.Key)
 		}
 		return nil
 	}
 }
 
-func outputMemoriesJSON(cmd *cobra.Command, memories []*internal.Memory) error {
-	out := make([]map[string]any, 0, len(memories))
-	for _, mem := range memories {
-		out = append(out, map[string]any{
-			"key":        mem.Key.String(),
+func outputListJSON(cmd *cobra.Command, out *internal.ListMemoriesOutput) error {
+	data := make([]map[string]any, 0, len(out.Memories))
+	for _, mem := range out.Memories {
+		data = append(data, map[string]any{
+			"key":        mem.Key,
 			"created_at": mem.CreatedAt,
 			"updated_at": mem.UpdatedAt,
 		})
@@ -59,5 +61,5 @@ func outputMemoriesJSON(cmd *cobra.Command, memories []*internal.Memory) error {
 
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return enc.Encode(data)
 }

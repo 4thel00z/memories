@@ -12,19 +12,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewWatchCmd(hist func() *internal.HistoryService) *cobra.Command {
+func NewWatchCmd(commitUC *internal.CommitUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch",
 		Short: "Watch for changes and auto-commit",
 		Long:  `Watch the memory store for file changes and automatically commit them.`,
-		RunE:  makeWatchRunner(hist),
+		RunE:  makeWatchRunner(commitUC),
 	}
 
 	cmd.Flags().Duration("debounce", 500*time.Millisecond, "Debounce window for batching changes")
 	return cmd
 }
 
-func makeWatchRunner(hist func() *internal.HistoryService) func(*cobra.Command, []string) error {
+func makeWatchRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, _ []string) error {
 		scopeHint, _ := cmd.Flags().GetString("scope")
 		debounce, _ := cmd.Flags().GetDuration("debounce")
@@ -76,11 +76,13 @@ func makeWatchRunner(hist func() *internal.HistoryService) func(*cobra.Command, 
 				fmt.Fprintf(cmd.ErrOrStderr(), "watch error: %v\n", err)
 			case <-timer.C:
 				pending = false
-				commit, commitErr := hist().Commit(cmd.Context(), "auto: watch commit", scopeHint)
+				out, commitErr := commitUC.Execute(cmd.Context(), internal.CommitInput{
+					Message: "auto: watch commit", Scope: scopeHint,
+				})
 				if commitErr != nil {
 					continue
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", commit.Hash[:7], commit.Message)
+				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", out.Hash[:7], out.Message)
 			}
 		}
 	}

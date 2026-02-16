@@ -8,19 +8,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewSummarizeCmd(svc func() *internal.SummarizeService) *cobra.Command {
+func NewSummarizeCmd(summarizeUC *internal.SummarizeUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "summarize [prefix]",
 		Short: "Summarize memories using AI",
 		Long:  `Generate an AI-powered summary of memories, optionally filtered by prefix.`,
 		Args:  cobra.MaximumNArgs(1),
-		RunE:  makeSummarizeRunner(svc),
+		RunE:  makeSummarizeRunner(summarizeUC),
 	}
 
 	return cmd
 }
 
-func makeSummarizeRunner(svc func() *internal.SummarizeService) func(*cobra.Command, []string) error {
+func makeSummarizeRunner(summarizeUC *internal.SummarizeUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		prefix := ""
 		if len(args) > 0 {
@@ -30,7 +30,9 @@ func makeSummarizeRunner(svc func() *internal.SummarizeService) func(*cobra.Comm
 		scopeHint, _ := cmd.Flags().GetString("scope")
 		asJSON, _ := cmd.Flags().GetBool("json")
 
-		summary, err := svc().Summarize(cmd.Context(), prefix, scopeHint)
+		out, err := summarizeUC.Execute(cmd.Context(), internal.SummarizeInput{
+			Prefix: prefix, Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("summarize: %w", err)
 		}
@@ -38,18 +40,18 @@ func makeSummarizeRunner(svc func() *internal.SummarizeService) func(*cobra.Comm
 		if asJSON {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
-			return enc.Encode(summary)
+			return enc.Encode(out)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n%s\n", summary.Title, summary.Overview)
-		if len(summary.KeyPoints) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n%s\n", out.Title, out.Overview)
+		if len(out.KeyPoints) > 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "\nKey Points:")
-			for _, p := range summary.KeyPoints {
+			for _, p := range out.KeyPoints {
 				fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", p)
 			}
 		}
-		if len(summary.Tags) > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "\nTags: %v\n", summary.Tags)
+		if len(out.Tags) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTags: %v\n", out.Tags)
 		}
 		return nil
 	}

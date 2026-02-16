@@ -10,19 +10,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewCommitCmd(hist func() *internal.HistoryService) *cobra.Command {
+func NewCommitCmd(commitUC *internal.CommitUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "commit",
 		Short: "Commit staged changes",
 		Long:  `Commit all staged changes to the memory store. Opens $EDITOR if no message provided.`,
-		RunE:  makeCommitRunner(hist),
+		RunE:  makeCommitRunner(commitUC),
 	}
 
 	cmd.Flags().StringP("message", "m", "", "Commit message")
 	return cmd
 }
 
-func makeCommitRunner(hist func() *internal.HistoryService) func(*cobra.Command, []string) error {
+func makeCommitRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		message, _ := cmd.Flags().GetString("message")
 		scopeHint, _ := cmd.Flags().GetString("scope")
@@ -39,12 +39,14 @@ func makeCommitRunner(hist func() *internal.HistoryService) func(*cobra.Command,
 			return fmt.Errorf("commit message required")
 		}
 
-		commit, err := hist().Commit(cmd.Context(), message, scopeHint)
+		out, err := commitUC.Execute(cmd.Context(), internal.CommitInput{
+			Message: message, Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("commit: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", commit.Hash[:7], commit.Message)
+		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", out.Hash[:7], out.Message)
 		return nil
 	}
 }

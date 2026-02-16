@@ -8,47 +8,49 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewGetCmd(svc func() *internal.MemoryService) *cobra.Command {
+func NewGetCmd(getUC *internal.GetMemoryUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <key>",
 		Short: "Retrieve a memory",
 		Long:  `Retrieve and display the content of a memory.`,
 		Args:  cobra.ExactArgs(1),
-		RunE:  makeGetRunner(svc),
+		RunE:  makeGetRunner(getUC),
 	}
 
 	return cmd
 }
 
-func makeGetRunner(svc func() *internal.MemoryService) func(*cobra.Command, []string) error {
+func makeGetRunner(getUC *internal.GetMemoryUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 		scopeHint, _ := cmd.Flags().GetString("scope")
 		asJSON, _ := cmd.Flags().GetBool("json")
 
-		mem, err := svc().Get(cmd.Context(), key, scopeHint)
+		out, err := getUC.Execute(cmd.Context(), internal.GetMemoryInput{
+			Key: key, Scope: scopeHint,
+		})
 		if err != nil {
 			return fmt.Errorf("get memory: %w", err)
 		}
 
 		if asJSON {
-			return outputMemoryJSON(cmd, mem)
+			return outputGetMemoryJSON(cmd, out)
 		}
 
-		fmt.Fprint(cmd.OutOrStdout(), string(mem.Content))
+		fmt.Fprint(cmd.OutOrStdout(), out.Content)
 		return nil
 	}
 }
 
-func outputMemoryJSON(cmd *cobra.Command, mem *internal.Memory) error {
-	out := map[string]any{
-		"key":        mem.Key.String(),
-		"content":    string(mem.Content),
-		"created_at": mem.CreatedAt,
-		"updated_at": mem.UpdatedAt,
+func outputGetMemoryJSON(cmd *cobra.Command, out *internal.GetMemoryOutput) error {
+	data := map[string]any{
+		"key":        out.Key,
+		"content":    out.Content,
+		"created_at": out.CreatedAt,
+		"updated_at": out.UpdatedAt,
 	}
 
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return enc.Encode(data)
 }
