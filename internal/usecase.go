@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -61,6 +62,20 @@ type LogOutput struct {
 	Commits []CommitOutput
 }
 
+type DiffInput struct {
+	Ref   string
+	Scope string
+}
+
+type DiffOutput struct {
+	Diff string
+}
+
+type RevertInput struct {
+	Ref   string
+	Scope string
+}
+
 type SearchInput struct {
 	Query string
 	Limit int
@@ -76,6 +91,11 @@ type SearchResultOutput struct {
 	Score float32
 }
 
+type RebuildIndexInput struct {
+	Scope    string
+	NumTrees int
+}
+
 type SummarizeInput struct {
 	Prefix string
 	Scope  string
@@ -88,20 +108,95 @@ type SummarizeOutput struct {
 	Tags      []string
 }
 
-// Use cases
+type AutoTagInput struct {
+	Key   string
+	Scope string
+}
+
+type AutoTagOutput struct {
+	Tags       []string
+	Category   string
+	Confidence float32
+}
+
+type BranchInput struct {
+	Name  string
+	Scope string
+}
+
+type BranchOutput struct {
+	Name      string
+	Head      string
+	CreatedAt time.Time
+}
+
+type BranchListOutput struct {
+	Branches []BranchOutput
+}
+
+type ProviderInput struct {
+	Name   string
+	Scope  string
+	Config ProviderConfig
+}
+
+type AddMemoryInput struct {
+	Key     string
+	Content string
+	Scope   string
+	Message string
+}
+
+type EditMemoryInput struct {
+	Key     string
+	Content string
+	Scope   string
+	Message string
+}
+
+// UseCases is the holder struct that aggregates all use cases.
+type UseCases struct {
+	SetMemory      *SetMemoryUseCase
+	GetMemory      *GetMemoryUseCase
+	DeleteMemory   *DeleteMemoryUseCase
+	ListMemories   *ListMemoriesUseCase
+	AddMemory      *AddMemoryUseCase
+	EditMemory     *EditMemoryUseCase
+	Commit         *CommitUseCase
+	Log            *LogUseCase
+	Diff           *DiffUseCase
+	Revert         *RevertUseCase
+	KeywordSearch  *KeywordSearchUseCase
+	SemanticSearch *SemanticSearchUseCase
+	RebuildIndex   *RebuildIndexUseCase
+	Summarize      *SummarizeUseCase
+	AutoTag        *AutoTagUseCase
+	BranchCurrent  *BranchCurrentUseCase
+	BranchList     *BranchListUseCase
+	BranchCreate   *BranchCreateUseCase
+	BranchSwitch   *BranchSwitchUseCase
+	BranchDelete   *BranchDeleteUseCase
+	ProviderList   *ProviderListUseCase
+	ProviderAdd    *ProviderAddUseCase
+	ProviderRemove *ProviderRemoveUseCase
+	ProviderSetDef *ProviderSetDefaultUseCase
+	ProviderTest   *ProviderTestUseCase
+}
+
+// --- SetMemoryUseCase ---
 
 type SetMemoryUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
-	indexFor func(Scope) (*AnnoyIndex, error)
+	repoFor  func(Scope) (MemoryRepository, error)
+	indexFor func(Scope) (VectorIndex, error)
 	embedder Embedder
 	ignore   func(Scope) (*IgnoreMatcher, error)
 }
 
 func NewSetMemoryUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
-	indexFor func(Scope) (*AnnoyIndex, error),
+	repoFor func(Scope) (MemoryRepository, error),
+	indexFor func(Scope) (VectorIndex, error),
 	embedder Embedder,
 	ignore func(Scope) (*IgnoreMatcher, error),
 ) *SetMemoryUseCase {
@@ -151,11 +246,13 @@ func (uc *SetMemoryUseCase) Execute(ctx context.Context, input SetMemoryInput) e
 
 	index, err := uc.indexFor(scope)
 	if err != nil {
+		slog.Warn("skipping index update: failed to get index", "error", err)
 		return nil
 	}
 
 	vec, err := uc.embedder.Embed(ctx, input.Content)
 	if err != nil {
+		slog.Warn("skipping index update: embedding failed", "error", err)
 		return nil
 	}
 
@@ -165,14 +262,16 @@ func (uc *SetMemoryUseCase) Execute(ctx context.Context, input SetMemoryInput) e
 	return nil
 }
 
+// --- GetMemoryUseCase ---
+
 type GetMemoryUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	repoFor  func(Scope) (MemoryRepository, error)
 }
 
 func NewGetMemoryUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	repoFor func(Scope) (MemoryRepository, error),
 ) *GetMemoryUseCase {
 	return &GetMemoryUseCase{
 		resolver: resolver,
@@ -213,16 +312,18 @@ func (uc *GetMemoryUseCase) Execute(ctx context.Context, input GetMemoryInput) (
 	return nil, ErrNotFound
 }
 
+// --- DeleteMemoryUseCase ---
+
 type DeleteMemoryUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
-	indexFor func(Scope) (*AnnoyIndex, error)
+	repoFor  func(Scope) (MemoryRepository, error)
+	indexFor func(Scope) (VectorIndex, error)
 }
 
 func NewDeleteMemoryUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
-	indexFor func(Scope) (*AnnoyIndex, error),
+	repoFor func(Scope) (MemoryRepository, error),
+	indexFor func(Scope) (VectorIndex, error),
 ) *DeleteMemoryUseCase {
 	return &DeleteMemoryUseCase{
 		resolver: resolver,
@@ -256,14 +357,16 @@ func (uc *DeleteMemoryUseCase) Execute(ctx context.Context, input DeleteMemoryIn
 	return nil
 }
 
+// --- ListMemoriesUseCase ---
+
 type ListMemoriesUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	repoFor  func(Scope) (MemoryRepository, error)
 }
 
 func NewListMemoriesUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	repoFor func(Scope) (MemoryRepository, error),
 ) *ListMemoriesUseCase {
 	return &ListMemoriesUseCase{
 		resolver: resolver,
@@ -299,35 +402,33 @@ func (uc *ListMemoriesUseCase) Execute(ctx context.Context, input ListMemoriesIn
 	return output, nil
 }
 
+// --- AddMemoryUseCase ---
+
 type AddMemoryUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
-	indexFor func(Scope) (*AnnoyIndex, error)
+	repoFor  func(Scope) (MemoryRepository, error)
+	histFor  func(Scope) (HistoryRepository, error)
+	indexFor func(Scope) (VectorIndex, error)
 	embedder Embedder
 	ignore   func(Scope) (*IgnoreMatcher, error)
 }
 
 func NewAddMemoryUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
-	indexFor func(Scope) (*AnnoyIndex, error),
+	repoFor func(Scope) (MemoryRepository, error),
+	histFor func(Scope) (HistoryRepository, error),
+	indexFor func(Scope) (VectorIndex, error),
 	embedder Embedder,
 	ignore func(Scope) (*IgnoreMatcher, error),
 ) *AddMemoryUseCase {
 	return &AddMemoryUseCase{
 		resolver: resolver,
 		repoFor:  repoFor,
+		histFor:  histFor,
 		indexFor: indexFor,
 		embedder: embedder,
 		ignore:   ignore,
 	}
-}
-
-type AddMemoryInput struct {
-	Key     string
-	Content string
-	Scope   string
-	Message string
 }
 
 func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (*CommitOutput, error) {
@@ -374,7 +475,12 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 		message = fmt.Sprintf("add: append to %s", input.Key)
 	}
 
-	commit, err := repo.Commit(ctx, message)
+	hist, err := uc.histFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get history repository: %w", err)
+	}
+
+	commit, err := hist.Commit(ctx, message)
 	if err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
@@ -384,7 +490,11 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 			if vec, err := uc.embedder.Embed(ctx, string(newContent)); err == nil {
 				emb := NewEmbedding(vec, "local")
 				_ = index.Add(ctx, key, emb)
+			} else {
+				slog.Warn("skipping index update: embedding failed", "error", err)
 			}
+		} else {
+			slog.Warn("skipping index update: failed to get index", "error", err)
 		}
 	}
 
@@ -395,35 +505,33 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 	}, nil
 }
 
+// --- EditMemoryUseCase ---
+
 type EditMemoryUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
-	indexFor func(Scope) (*AnnoyIndex, error)
+	repoFor  func(Scope) (MemoryRepository, error)
+	histFor  func(Scope) (HistoryRepository, error)
+	indexFor func(Scope) (VectorIndex, error)
 	embedder Embedder
 	ignore   func(Scope) (*IgnoreMatcher, error)
 }
 
 func NewEditMemoryUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
-	indexFor func(Scope) (*AnnoyIndex, error),
+	repoFor func(Scope) (MemoryRepository, error),
+	histFor func(Scope) (HistoryRepository, error),
+	indexFor func(Scope) (VectorIndex, error),
 	embedder Embedder,
 	ignore func(Scope) (*IgnoreMatcher, error),
 ) *EditMemoryUseCase {
 	return &EditMemoryUseCase{
 		resolver: resolver,
 		repoFor:  repoFor,
+		histFor:  histFor,
 		indexFor: indexFor,
 		embedder: embedder,
 		ignore:   ignore,
 	}
-}
-
-type EditMemoryInput struct {
-	Key     string
-	Content string
-	Scope   string
-	Message string
 }
 
 func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput) (*CommitOutput, error) {
@@ -462,7 +570,12 @@ func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput)
 		message = fmt.Sprintf("edit: update %s", input.Key)
 	}
 
-	commit, err := repo.Commit(ctx, message)
+	hist, err := uc.histFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get history repository: %w", err)
+	}
+
+	commit, err := hist.Commit(ctx, message)
 	if err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
@@ -472,7 +585,11 @@ func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput)
 			if vec, err := uc.embedder.Embed(ctx, input.Content); err == nil {
 				emb := NewEmbedding(vec, "local")
 				_ = index.Add(ctx, key, emb)
+			} else {
+				slog.Warn("skipping index update: embedding failed", "error", err)
 			}
+		} else {
+			slog.Warn("skipping index update: failed to get index", "error", err)
 		}
 	}
 
@@ -483,29 +600,31 @@ func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput)
 	}, nil
 }
 
+// --- CommitUseCase ---
+
 type CommitUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	histFor  func(Scope) (HistoryRepository, error)
 }
 
 func NewCommitUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	histFor func(Scope) (HistoryRepository, error),
 ) *CommitUseCase {
 	return &CommitUseCase{
 		resolver: resolver,
-		repoFor:  repoFor,
+		histFor:  histFor,
 	}
 }
 
 func (uc *CommitUseCase) Execute(ctx context.Context, input CommitInput) (*CommitOutput, error) {
 	scope := uc.resolver.Resolve(input.Scope)
-	repo, err := uc.repoFor(scope)
+	hist, err := uc.histFor(scope)
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
 
-	commit, err := repo.Commit(ctx, input.Message)
+	commit, err := hist.Commit(ctx, input.Message)
 	if err != nil {
 		return nil, err
 	}
@@ -517,29 +636,31 @@ func (uc *CommitUseCase) Execute(ctx context.Context, input CommitInput) (*Commi
 	}, nil
 }
 
+// --- LogUseCase ---
+
 type LogUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	histFor  func(Scope) (HistoryRepository, error)
 }
 
 func NewLogUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	histFor func(Scope) (HistoryRepository, error),
 ) *LogUseCase {
 	return &LogUseCase{
 		resolver: resolver,
-		repoFor:  repoFor,
+		histFor:  histFor,
 	}
 }
 
 func (uc *LogUseCase) Execute(ctx context.Context, input LogInput) (*LogOutput, error) {
 	scope := uc.resolver.Resolve(input.Scope)
-	repo, err := uc.repoFor(scope)
+	hist, err := uc.histFor(scope)
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
 
-	commits, err := repo.Log(ctx, input.Limit)
+	commits, err := hist.Log(ctx, input.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -559,14 +680,75 @@ func (uc *LogUseCase) Execute(ctx context.Context, input LogInput) (*LogOutput, 
 	return output, nil
 }
 
+// --- DiffUseCase ---
+
+type DiffUseCase struct {
+	resolver *ScopeResolver
+	histFor  func(Scope) (HistoryRepository, error)
+}
+
+func NewDiffUseCase(
+	resolver *ScopeResolver,
+	histFor func(Scope) (HistoryRepository, error),
+) *DiffUseCase {
+	return &DiffUseCase{
+		resolver: resolver,
+		histFor:  histFor,
+	}
+}
+
+func (uc *DiffUseCase) Execute(ctx context.Context, input DiffInput) (*DiffOutput, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	hist, err := uc.histFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+
+	diff, err := hist.Diff(ctx, input.Ref)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DiffOutput{Diff: diff}, nil
+}
+
+// --- RevertUseCase ---
+
+type RevertUseCase struct {
+	resolver *ScopeResolver
+	histFor  func(Scope) (HistoryRepository, error)
+}
+
+func NewRevertUseCase(
+	resolver *ScopeResolver,
+	histFor func(Scope) (HistoryRepository, error),
+) *RevertUseCase {
+	return &RevertUseCase{
+		resolver: resolver,
+		histFor:  histFor,
+	}
+}
+
+func (uc *RevertUseCase) Execute(ctx context.Context, input RevertInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	hist, err := uc.histFor(scope)
+	if err != nil {
+		return fmt.Errorf("get repository: %w", err)
+	}
+
+	return hist.Revert(ctx, input.Ref)
+}
+
+// --- KeywordSearchUseCase ---
+
 type KeywordSearchUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	repoFor  func(Scope) (MemoryRepository, error)
 }
 
 func NewKeywordSearchUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	repoFor func(Scope) (MemoryRepository, error),
 ) *KeywordSearchUseCase {
 	return &KeywordSearchUseCase{
 		resolver: resolver,
@@ -605,15 +787,17 @@ func (uc *KeywordSearchUseCase) Execute(ctx context.Context, input SearchInput) 
 	return &SearchOutput{Results: results}, nil
 }
 
+// --- SemanticSearchUseCase ---
+
 type SemanticSearchUseCase struct {
 	resolver *ScopeResolver
-	indexFor func(Scope) (*AnnoyIndex, error)
+	indexFor func(Scope) (VectorIndex, error)
 	embedder Embedder
 }
 
 func NewSemanticSearchUseCase(
 	resolver *ScopeResolver,
-	indexFor func(Scope) (*AnnoyIndex, error),
+	indexFor func(Scope) (VectorIndex, error),
 	embedder Embedder,
 ) *SemanticSearchUseCase {
 	return &SemanticSearchUseCase{
@@ -659,15 +843,77 @@ func (uc *SemanticSearchUseCase) Execute(ctx context.Context, input SearchInput)
 	return output, nil
 }
 
+// --- RebuildIndexUseCase ---
+
+type RebuildIndexUseCase struct {
+	resolver *ScopeResolver
+	repoFor  func(Scope) (MemoryRepository, error)
+	indexFor func(Scope) (VectorIndex, error)
+	embedder Embedder
+}
+
+func NewRebuildIndexUseCase(
+	resolver *ScopeResolver,
+	repoFor func(Scope) (MemoryRepository, error),
+	indexFor func(Scope) (VectorIndex, error),
+	embedder Embedder,
+) *RebuildIndexUseCase {
+	return &RebuildIndexUseCase{
+		resolver: resolver,
+		repoFor:  repoFor,
+		indexFor: indexFor,
+		embedder: embedder,
+	}
+}
+
+func (uc *RebuildIndexUseCase) Execute(ctx context.Context, input RebuildIndexInput) error {
+	if uc.embedder == nil {
+		return fmt.Errorf("embedder not available")
+	}
+
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.repoFor(scope)
+	if err != nil {
+		return fmt.Errorf("get repository: %w", err)
+	}
+
+	index, err := uc.indexFor(scope)
+	if err != nil {
+		return fmt.Errorf("get index: %w", err)
+	}
+
+	memories, err := repo.List(ctx, "")
+	if err != nil {
+		return fmt.Errorf("list memories: %w", err)
+	}
+
+	for _, mem := range memories {
+		vec, err := uc.embedder.Embed(ctx, string(mem.Content))
+		if err != nil {
+			continue
+		}
+		emb := NewEmbedding(vec, "local")
+		_ = index.Add(ctx, mem.Key, emb)
+	}
+
+	if err := index.Build(ctx, input.NumTrees); err != nil {
+		return fmt.Errorf("build index: %w", err)
+	}
+
+	return index.Save(ctx)
+}
+
+// --- SummarizeUseCase ---
+
 type SummarizeUseCase struct {
 	resolver *ScopeResolver
-	repoFor  func(Scope) (*GitRepository, error)
+	repoFor  func(Scope) (MemoryRepository, error)
 	provider Provider
 }
 
 func NewSummarizeUseCase(
 	resolver *ScopeResolver,
-	repoFor func(Scope) (*GitRepository, error),
+	repoFor func(Scope) (MemoryRepository, error),
 	provider Provider,
 ) *SummarizeUseCase {
 	return &SummarizeUseCase{
@@ -714,4 +960,355 @@ func (uc *SummarizeUseCase) Execute(ctx context.Context, input SummarizeInput) (
 		KeyPoints: summary.KeyPoints,
 		Tags:      summary.Tags,
 	}, nil
+}
+
+// --- AutoTagUseCase ---
+
+type AutoTagUseCase struct {
+	resolver *ScopeResolver
+	repoFor  func(Scope) (MemoryRepository, error)
+	provider Provider
+}
+
+func NewAutoTagUseCase(
+	resolver *ScopeResolver,
+	repoFor func(Scope) (MemoryRepository, error),
+	provider Provider,
+) *AutoTagUseCase {
+	return &AutoTagUseCase{
+		resolver: resolver,
+		repoFor:  repoFor,
+		provider: provider,
+	}
+}
+
+func (uc *AutoTagUseCase) Execute(ctx context.Context, input AutoTagInput) (*AutoTagOutput, error) {
+	if uc.provider == nil {
+		return nil, fmt.Errorf("provider not available")
+	}
+
+	key, err := NewKey(input.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.repoFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+
+	mem, err := repo.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("get memory: %w", err)
+	}
+
+	prompt := fmt.Sprintf("Generate tags for this content:\n\n%s", string(mem.Content))
+
+	var tags AutoTag
+	if err := uc.provider.GenerateObject(ctx, prompt, &tags); err != nil {
+		return nil, fmt.Errorf("generate tags: %w", err)
+	}
+
+	return &AutoTagOutput{
+		Tags:       tags.Tags,
+		Category:   tags.Category,
+		Confidence: tags.Confidence,
+	}, nil
+}
+
+// --- BranchCurrentUseCase ---
+
+type BranchCurrentUseCase struct {
+	resolver  *ScopeResolver
+	branchFor func(Scope) (BranchRepository, error)
+}
+
+func NewBranchCurrentUseCase(
+	resolver *ScopeResolver,
+	branchFor func(Scope) (BranchRepository, error),
+) *BranchCurrentUseCase {
+	return &BranchCurrentUseCase{
+		resolver:  resolver,
+		branchFor: branchFor,
+	}
+}
+
+func (uc *BranchCurrentUseCase) Execute(ctx context.Context, input BranchInput) (*BranchOutput, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.branchFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+
+	branch, err := repo.Current(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BranchOutput{
+		Name:      branch.Name,
+		Head:      branch.Head,
+		CreatedAt: branch.CreatedAt,
+	}, nil
+}
+
+// --- BranchListUseCase ---
+
+type BranchListUseCase struct {
+	resolver  *ScopeResolver
+	branchFor func(Scope) (BranchRepository, error)
+}
+
+func NewBranchListUseCase(
+	resolver *ScopeResolver,
+	branchFor func(Scope) (BranchRepository, error),
+) *BranchListUseCase {
+	return &BranchListUseCase{
+		resolver:  resolver,
+		branchFor: branchFor,
+	}
+}
+
+func (uc *BranchListUseCase) Execute(ctx context.Context, input BranchInput) (*BranchListOutput, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.branchFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+
+	branches, err := repo.ListBranches(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	output := &BranchListOutput{
+		Branches: make([]BranchOutput, len(branches)),
+	}
+	for i, b := range branches {
+		output.Branches[i] = BranchOutput{
+			Name:      b.Name,
+			Head:      b.Head,
+			CreatedAt: b.CreatedAt,
+		}
+	}
+
+	return output, nil
+}
+
+// --- BranchCreateUseCase ---
+
+type BranchCreateUseCase struct {
+	resolver  *ScopeResolver
+	branchFor func(Scope) (BranchRepository, error)
+}
+
+func NewBranchCreateUseCase(
+	resolver *ScopeResolver,
+	branchFor func(Scope) (BranchRepository, error),
+) *BranchCreateUseCase {
+	return &BranchCreateUseCase{
+		resolver:  resolver,
+		branchFor: branchFor,
+	}
+}
+
+func (uc *BranchCreateUseCase) Execute(ctx context.Context, input BranchInput) (*BranchOutput, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.branchFor(scope)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+
+	branch, err := repo.Create(ctx, input.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BranchOutput{
+		Name:      branch.Name,
+		Head:      branch.Head,
+		CreatedAt: branch.CreatedAt,
+	}, nil
+}
+
+// --- BranchSwitchUseCase ---
+
+type BranchSwitchUseCase struct {
+	resolver  *ScopeResolver
+	branchFor func(Scope) (BranchRepository, error)
+}
+
+func NewBranchSwitchUseCase(
+	resolver *ScopeResolver,
+	branchFor func(Scope) (BranchRepository, error),
+) *BranchSwitchUseCase {
+	return &BranchSwitchUseCase{
+		resolver:  resolver,
+		branchFor: branchFor,
+	}
+}
+
+func (uc *BranchSwitchUseCase) Execute(ctx context.Context, input BranchInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.branchFor(scope)
+	if err != nil {
+		return fmt.Errorf("get repository: %w", err)
+	}
+
+	return repo.Switch(ctx, input.Name)
+}
+
+// --- BranchDeleteUseCase ---
+
+type BranchDeleteUseCase struct {
+	resolver  *ScopeResolver
+	branchFor func(Scope) (BranchRepository, error)
+}
+
+func NewBranchDeleteUseCase(
+	resolver *ScopeResolver,
+	branchFor func(Scope) (BranchRepository, error),
+) *BranchDeleteUseCase {
+	return &BranchDeleteUseCase{
+		resolver:  resolver,
+		branchFor: branchFor,
+	}
+}
+
+func (uc *BranchDeleteUseCase) Execute(ctx context.Context, input BranchInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	repo, err := uc.branchFor(scope)
+	if err != nil {
+		return fmt.Errorf("get repository: %w", err)
+	}
+
+	return repo.DeleteBranch(ctx, input.Name)
+}
+
+// --- ProviderListUseCase ---
+
+type ProviderListUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewProviderListUseCase(resolver *ScopeResolver) *ProviderListUseCase {
+	return &ProviderListUseCase{resolver: resolver}
+}
+
+func (uc *ProviderListUseCase) Execute(input ProviderInput) ([]string, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	cfg, err := LoadConfig(scope)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// --- ProviderAddUseCase ---
+
+type ProviderAddUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewProviderAddUseCase(resolver *ScopeResolver) *ProviderAddUseCase {
+	return &ProviderAddUseCase{resolver: resolver}
+}
+
+func (uc *ProviderAddUseCase) Execute(input ProviderInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	cfg, err := LoadConfig(scope)
+	if err != nil {
+		return err
+	}
+
+	cfg.Providers[input.Name] = input.Config
+	return SaveConfig(scope, cfg)
+}
+
+// --- ProviderRemoveUseCase ---
+
+type ProviderRemoveUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewProviderRemoveUseCase(resolver *ScopeResolver) *ProviderRemoveUseCase {
+	return &ProviderRemoveUseCase{resolver: resolver}
+}
+
+func (uc *ProviderRemoveUseCase) Execute(input ProviderInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	cfg, err := LoadConfig(scope)
+	if err != nil {
+		return err
+	}
+
+	delete(cfg.Providers, input.Name)
+	return SaveConfig(scope, cfg)
+}
+
+// --- ProviderSetDefaultUseCase ---
+
+type ProviderSetDefaultUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewProviderSetDefaultUseCase(resolver *ScopeResolver) *ProviderSetDefaultUseCase {
+	return &ProviderSetDefaultUseCase{resolver: resolver}
+}
+
+func (uc *ProviderSetDefaultUseCase) Execute(input ProviderInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	cfg, err := LoadConfig(scope)
+	if err != nil {
+		return err
+	}
+
+	if _, exists := cfg.Providers[input.Name]; !exists {
+		return fmt.Errorf("provider %q not found", input.Name)
+	}
+
+	cfg.DefaultProvider = input.Name
+	return SaveConfig(scope, cfg)
+}
+
+// --- ProviderTestUseCase ---
+
+type ProviderTestUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewProviderTestUseCase(resolver *ScopeResolver) *ProviderTestUseCase {
+	return &ProviderTestUseCase{resolver: resolver}
+}
+
+func (uc *ProviderTestUseCase) Execute(ctx context.Context, input ProviderInput) error {
+	scope := uc.resolver.Resolve(input.Scope)
+	cfg, err := LoadConfig(scope)
+	if err != nil {
+		return err
+	}
+
+	providerCfg, exists := cfg.Providers[input.Name]
+	if !exists {
+		return fmt.Errorf("provider %q not found", input.Name)
+	}
+
+	provider, err := NewFantasyProvider(ctx, FantasyConfig{
+		Provider: input.Name,
+		APIKey:   providerCfg.APIKey,
+		BaseURL:  providerCfg.BaseURL,
+		Model:    providerCfg.Model,
+	})
+	if err != nil {
+		return fmt.Errorf("create provider: %w", err)
+	}
+
+	_, err = provider.Complete(ctx, "Say hello")
+	return err
 }

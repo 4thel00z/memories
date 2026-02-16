@@ -11,6 +11,8 @@ import (
 	"github.com/dianlight/gollama.cpp"
 )
 
+var _ Embedder = (*LocalEmbedder)(nil)
+
 type LocalEmbedder struct {
 	mu        sync.Mutex
 	model     gollama.LlamaModel

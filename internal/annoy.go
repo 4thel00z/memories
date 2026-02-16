@@ -17,6 +17,8 @@ const (
 	MappingFilename = "mapping.json"
 )
 
+var _ VectorIndex = (*AnnoyIndex)(nil)
+
 type AnnoyIndex struct {
 	mu        sync.RWMutex
 	idx       interfaces.AnnoyIndex[float32, uint32]
@@ -111,6 +113,14 @@ func (a *AnnoyIndex) Search(ctx context.Context, query Embedding, k int) ([]Sear
 
 	if len(query.Vector) != a.dimension {
 		return nil, fmt.Errorf("dimension mismatch: expected %d, got %d", a.dimension, len(query.Vector))
+	}
+
+	numItems := len(a.keyToID)
+	if k > numItems {
+		k = numItems
+	}
+	if k == 0 {
+		return nil, nil
 	}
 
 	searchCtx := a.idx.CreateContext()

@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/filesystem"
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 const (
@@ -23,6 +24,10 @@ const (
 	DefaultAuthor = "mem"
 	DefaultEmail  = "mem@local"
 )
+
+var _ MemoryRepository = (*GitRepository)(nil)
+var _ BranchRepository = (*GitRepository)(nil)
+var _ HistoryRepository = (*GitRepository)(nil)
 
 type GitRepository struct {
 	repo     *git.Repository
@@ -136,7 +141,7 @@ func (r *GitRepository) Get(ctx context.Context, key Key) (*Memory, error) {
 	return &Memory{
 		Key:       key,
 		Content:   content,
-		CreatedAt: info.ModTime(),
+		CreatedAt: r.getFirstCommitTime(key, info.ModTime()),
 		UpdatedAt: info.ModTime(),
 	}, nil
 }
@@ -223,7 +228,7 @@ func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, err
 		memories = append(memories, &Memory{
 			Key:       key,
 			Content:   content,
-			CreatedAt: info.ModTime(),
+			CreatedAt: r.getFirstCommitTime(key, info.ModTime()),
 			UpdatedAt: info.ModTime(),
 		})
 
@@ -416,8 +421,9 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 		return "", fmt.Errorf("get HEAD tree: %w", err)
 	}
 
-	// Build a pseudo-diff from worktree status against HEAD tree
 	var buf strings.Builder
+	dmp := diffmatchpatch.New()
+
 	for path, s := range status {
 		switch {
 		case s.Staging == git.Added:
@@ -426,9 +432,8 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 				continue
 			}
 			fmt.Fprintf(&buf, "--- /dev/null\n+++ b/%s\n", path)
-			for _, line := range strings.Split(string(content), "\n") {
-				fmt.Fprintf(&buf, "+%s\n", line)
-			}
+			writeUnifiedHunks(&buf, "", string(content), dmp)
+
 		case s.Staging == git.Modified:
 			f, headErr := headTree.File(path)
 			if headErr != nil {
@@ -443,12 +448,8 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 				continue
 			}
 			fmt.Fprintf(&buf, "--- a/%s\n+++ b/%s\n", path, path)
-			for _, line := range strings.Split(oldContent, "\n") {
-				fmt.Fprintf(&buf, "-%s\n", line)
-			}
-			for _, line := range strings.Split(string(newContent), "\n") {
-				fmt.Fprintf(&buf, "+%s\n", line)
-			}
+			writeUnifiedHunks(&buf, oldContent, string(newContent), dmp)
+
 		case s.Staging == git.Deleted:
 			f, headErr := headTree.File(path)
 			if headErr != nil {
@@ -459,13 +460,49 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 				continue
 			}
 			fmt.Fprintf(&buf, "--- a/%s\n+++ /dev/null\n", path)
-			for _, line := range strings.Split(oldContent, "\n") {
-				fmt.Fprintf(&buf, "-%s\n", line)
-			}
+			writeUnifiedHunks(&buf, oldContent, "", dmp)
 		}
 	}
 
 	return buf.String(), nil
+}
+
+func writeUnifiedHunks(buf *strings.Builder, oldText, newText string, dmp *diffmatchpatch.DiffMatchPatch) {
+	// Use line-level diffing for proper unified diff output
+	a, b, lineArray := dmp.DiffLinesToChars(oldText, newText)
+	diffs := dmp.DiffMain(a, b, false)
+	diffs = dmp.DiffCharsToLines(diffs, lineArray)
+	diffs = dmp.DiffCleanupSemantic(diffs)
+
+	oldLine := 1
+	newLine := 1
+	for _, diff := range diffs {
+		lines := strings.Split(diff.Text, "\n")
+		// Remove trailing empty string from split
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
+		count := len(lines)
+
+		switch diff.Type {
+		case diffmatchpatch.DiffEqual:
+			for _, line := range lines {
+				fmt.Fprintf(buf, " %s\n", line)
+			}
+			oldLine += count
+			newLine += count
+		case diffmatchpatch.DiffDelete:
+			for _, line := range lines {
+				fmt.Fprintf(buf, "-%s\n", line)
+			}
+			oldLine += count
+		case diffmatchpatch.DiffInsert:
+			for _, line := range lines {
+				fmt.Fprintf(buf, "+%s\n", line)
+			}
+			newLine += count
+		}
+	}
 }
 
 func (r *GitRepository) diffHeadVsRef(ref string) (string, error) {
@@ -543,6 +580,31 @@ func (r *GitRepository) Revert(ctx context.Context, ref string) error {
 }
 
 // helpers
+
+func (r *GitRepository) getFirstCommitTime(key Key, fallback time.Time) time.Time {
+	relPath := key.String()
+
+	iter, err := r.repo.Log(&git.LogOptions{
+		FileName: &relPath,
+	})
+	if err != nil {
+		return fallback
+	}
+	defer iter.Close()
+
+	var earliest time.Time
+	err = iter.ForEach(func(c *object.Commit) error {
+		if earliest.IsZero() || c.Author.When.Before(earliest) {
+			earliest = c.Author.When
+		}
+		return nil
+	})
+	if err != nil || earliest.IsZero() {
+		return fallback
+	}
+
+	return earliest
+}
 
 func (r *GitRepository) keyToPath(key Key) string {
 	return filepath.Join(r.rootPath, key.String())

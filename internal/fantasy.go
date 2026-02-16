@@ -19,6 +19,8 @@ type FantasyConfig struct {
 	Model    string
 }
 
+var _ Provider = (*FantasyProvider)(nil)
+
 type FantasyProvider struct {
 	model fantasy.LanguageModel
 	name  string

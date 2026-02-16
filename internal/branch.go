@@ -21,10 +21,10 @@ type Commit struct {
 
 type BranchRepository interface {
 	Current(ctx context.Context) (*Branch, error)
-	List(ctx context.Context) ([]*Branch, error)
+	ListBranches(ctx context.Context) ([]*Branch, error)
 	Create(ctx context.Context, name string) (*Branch, error)
 	Switch(ctx context.Context, name string) error
-	Delete(ctx context.Context, name string) error
+	DeleteBranch(ctx context.Context, name string) error
 }
 
 type HistoryRepository interface {
