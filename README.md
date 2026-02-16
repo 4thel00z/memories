@@ -1,8 +1,22 @@
+<div align="center">
+
 # mem
 
-A Git-powered, file-based memory store with semantic search.
+**Git-powered, file-based memory store with semantic search.**
 
-`mem` stores key-value memories in a Git repository (`.mem/`), giving you branching, history, diffing, and commit semantics for your data. It also supports vector-based semantic search via local embeddings.
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go&logoColor=white)](https://go.dev)
+[![CI](https://github.com/4thel00z/memories/actions/workflows/ci.yml/badge.svg)](https://github.com/4thel00z/memories/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/4thel00z/memories)](https://goreportcard.com/report/github.com/4thel00z/memories)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Store key-value memories in a Git repository, with branching, history, diffing,
+and commit semantics. Optionally add vector-based semantic search via local embeddings.
+
+[Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Public API](#public-api) · [Plugins](#extensibility)
+
+</div>
+
+---
 
 ## Install
 
@@ -133,8 +147,8 @@ mem branch main
 
 `mem` supports two scopes:
 
-- **Project scope** (`./.mem`): Per-project memories, found by walking up from the current directory.
-- **Global scope** (`~/.mem`): User-wide memories.
+- **Project scope** (`./.mem`) — per-project memories, found by walking up from the current directory.
+- **Global scope** (`~/.mem`) — user-wide memories.
 
 By default, `mem` uses project scope if a `.mem` directory exists in the current directory or any parent. Otherwise, it falls back to global scope. Use `--scope=global` to target global scope explicitly.
 
@@ -155,66 +169,6 @@ providers:
     model: anthropic/claude-sonnet-4-20250514
 
 default_provider: openrouter
-```
-
-## Extensibility
-
-Any executable named `mem-*` in your `$PATH` becomes a subcommand:
-
-```bash
-# Install a plugin
-cp my-plugin /usr/local/bin/mem-backup
-chmod +x /usr/local/bin/mem-backup
-
-# Use it
-mem backup
-```
-
-External commands receive these environment variables:
-
-| Variable | Example |
-|----------|---------|
-| `MEM_SCOPE` | `project` |
-| `MEM_SCOPE_PATH` | `/home/user/project/.mem` |
-| `MEM_ROOT` | `/home/user/project` |
-| `MEM_BRANCH` | `main` |
-| `MEM_CONFIG` | `/home/user/project/.mem/config.yaml` |
-| `MEM_VERSION` | `1.0.0` |
-| `MEM_BIN` | `/usr/local/bin/mem` |
-
-### Example Plugin (Shell)
-
-```bash
-#!/bin/bash
-# /usr/local/bin/mem-backup
-set -e
-OUTPUT="${1:-memories-backup-$(date +%Y%m%d).tar.gz}"
-echo "Backing up $MEM_SCOPE_PATH to $OUTPUT..."
-tar -czf "$OUTPUT" -C "$(dirname "$MEM_SCOPE_PATH")" "$(basename "$MEM_SCOPE_PATH")"
-echo "Done: $OUTPUT"
-```
-
-### Example Plugin (Go)
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "os"
-
-    memclient "github.com/4thel00z/memories/pkg/v1"
-)
-
-func main() {
-    client, _ := memclient.New()
-    defer client.Close()
-
-    memories, _ := client.List(context.Background(), "")
-    fmt.Printf("Found %d memories in %s scope\n",
-        len(memories), os.Getenv("MEM_SCOPE"))
-}
 ```
 
 ## Public API
@@ -258,6 +212,72 @@ func main() {
 }
 ```
 
+## Extensibility
+
+Any executable named `mem-*` in your `$PATH` becomes a subcommand:
+
+```bash
+# Install a plugin
+cp my-plugin /usr/local/bin/mem-backup
+chmod +x /usr/local/bin/mem-backup
+
+# Use it
+mem backup
+```
+
+External commands receive these environment variables:
+
+| Variable | Example |
+|----------|---------|
+| `MEM_SCOPE` | `project` |
+| `MEM_SCOPE_PATH` | `/home/user/project/.mem` |
+| `MEM_ROOT` | `/home/user/project` |
+| `MEM_BRANCH` | `main` |
+| `MEM_CONFIG` | `/home/user/project/.mem/config.yaml` |
+| `MEM_VERSION` | `1.0.0` |
+| `MEM_BIN` | `/usr/local/bin/mem` |
+
+<details>
+<summary>Example Plugin (Shell)</summary>
+
+```bash
+#!/bin/bash
+# /usr/local/bin/mem-backup
+set -e
+OUTPUT="${1:-memories-backup-$(date +%Y%m%d).tar.gz}"
+echo "Backing up $MEM_SCOPE_PATH to $OUTPUT..."
+tar -czf "$OUTPUT" -C "$(dirname "$MEM_SCOPE_PATH")" "$(basename "$MEM_SCOPE_PATH")"
+echo "Done: $OUTPUT"
+```
+
+</details>
+
+<details>
+<summary>Example Plugin (Go)</summary>
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    memclient "github.com/4thel00z/memories/pkg/v1"
+)
+
+func main() {
+    client, _ := memclient.New()
+    defer client.Close()
+
+    memories, _ := client.List(context.Background(), "")
+    fmt.Printf("Found %d memories in %s scope\n",
+        len(memories), os.Getenv("MEM_SCOPE"))
+}
+```
+
+</details>
+
 ## Storage Layout
 
 ```
@@ -277,20 +297,12 @@ func main() {
 ## Development
 
 ```bash
-# Install dependencies
-go mod tidy
-
-# Install git hooks
-make install-hooks
-
-# Build
-make build
-
-# Run tests
-make test
-
-# Run linter
-golangci-lint run
+make help          # Show all targets
+make build         # Build mem binary
+make test          # Run all tests
+make test-cover    # Run tests with coverage report
+make lint          # Run golangci-lint
+make install-hooks # Install git hooks (lefthook)
 ```
 
 ## License
