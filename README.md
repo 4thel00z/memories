@@ -313,6 +313,14 @@ mkdir -p .claude/skills
 ln -s "$(pwd)/skills/using-mem" .claude/skills/using-mem
 ```
 
+### Install remotely (any project)
+
+```bash
+mkdir -p .claude/skills/using-mem
+curl -fsSL https://raw.githubusercontent.com/4thel00z/memories/main/skills/using-mem/SKILL.md \
+  -o .claude/skills/using-mem/SKILL.md
+```
+
 Once installed, Claude Code will automatically recall relevant memories at session start and store decisions at milestones. Run `/skill using-mem` to invoke it manually.
 
 ## Development
