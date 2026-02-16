@@ -385,6 +385,22 @@ func (r *GitRepository) Log(ctx context.Context, limit int) ([]*Commit, error) {
 }
 
 func (r *GitRepository) Diff(ctx context.Context, ref string) (string, error) {
+	if ref == "" {
+		return r.diffWorktreeVsHead()
+	}
+	return r.diffHeadVsRef(ref)
+}
+
+func (r *GitRepository) diffWorktreeVsHead() (string, error) {
+	status, err := r.worktree.Status()
+	if err != nil {
+		return "", fmt.Errorf("get status: %w", err)
+	}
+
+	if status.IsClean() {
+		return "", nil
+	}
+
 	head, err := r.repo.Head()
 	if err != nil {
 		return "", fmt.Errorf("get HEAD: %w", err)
@@ -395,21 +411,80 @@ func (r *GitRepository) Diff(ctx context.Context, ref string) (string, error) {
 		return "", fmt.Errorf("get HEAD commit: %w", err)
 	}
 
-	var targetHash plumbing.Hash
-	if ref == "" {
-		if len(headCommit.ParentHashes) == 0 {
-			return "", nil
-		}
-		targetHash = headCommit.ParentHashes[0]
-	} else {
-		resolved, err := r.repo.ResolveRevision(plumbing.Revision(ref))
-		if err != nil {
-			return "", fmt.Errorf("resolve ref: %w", err)
-		}
-		targetHash = *resolved
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return "", fmt.Errorf("get HEAD tree: %w", err)
 	}
 
-	targetCommit, err := r.repo.CommitObject(targetHash)
+	// Build a pseudo-diff from worktree status against HEAD tree
+	var buf strings.Builder
+	for path, s := range status {
+		switch {
+		case s.Staging == git.Added:
+			content, readErr := os.ReadFile(filepath.Join(r.rootPath, path))
+			if readErr != nil {
+				continue
+			}
+			fmt.Fprintf(&buf, "--- /dev/null\n+++ b/%s\n", path)
+			for _, line := range strings.Split(string(content), "\n") {
+				fmt.Fprintf(&buf, "+%s\n", line)
+			}
+		case s.Staging == git.Modified:
+			f, headErr := headTree.File(path)
+			if headErr != nil {
+				continue
+			}
+			oldContent, headErr := f.Contents()
+			if headErr != nil {
+				continue
+			}
+			newContent, readErr := os.ReadFile(filepath.Join(r.rootPath, path))
+			if readErr != nil {
+				continue
+			}
+			fmt.Fprintf(&buf, "--- a/%s\n+++ b/%s\n", path, path)
+			for _, line := range strings.Split(oldContent, "\n") {
+				fmt.Fprintf(&buf, "-%s\n", line)
+			}
+			for _, line := range strings.Split(string(newContent), "\n") {
+				fmt.Fprintf(&buf, "+%s\n", line)
+			}
+		case s.Staging == git.Deleted:
+			f, headErr := headTree.File(path)
+			if headErr != nil {
+				continue
+			}
+			oldContent, headErr := f.Contents()
+			if headErr != nil {
+				continue
+			}
+			fmt.Fprintf(&buf, "--- a/%s\n+++ /dev/null\n", path)
+			for _, line := range strings.Split(oldContent, "\n") {
+				fmt.Fprintf(&buf, "-%s\n", line)
+			}
+		}
+	}
+
+	return buf.String(), nil
+}
+
+func (r *GitRepository) diffHeadVsRef(ref string) (string, error) {
+	head, err := r.repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("get HEAD: %w", err)
+	}
+
+	headCommit, err := r.repo.CommitObject(head.Hash())
+	if err != nil {
+		return "", fmt.Errorf("get HEAD commit: %w", err)
+	}
+
+	resolved, err := r.repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return "", fmt.Errorf("resolve ref: %w", err)
+	}
+
+	targetCommit, err := r.repo.CommitObject(*resolved)
 	if err != nil {
 		return "", fmt.Errorf("get target commit: %w", err)
 	}
