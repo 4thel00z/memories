@@ -32,21 +32,20 @@ var _ HistoryRepository = (*GitRepository)(nil)
 type GitRepository struct {
 	repo     *git.Repository
 	worktree *git.Worktree
-	rootPath string
 	memPath  string
 }
 
 func NewGitRepository(scope Scope) (*GitRepository, error) {
 	memPath := scope.MemPath
-	rootPath := scope.Path
 
 	if _, err := os.Stat(memPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("repository not initialized: %s", memPath)
 	}
 
-	fs := osfs.New(memPath)
+	dotgit := filepath.Join(memPath, ".git")
+	fs := osfs.New(dotgit)
 	storage := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
-	wt := osfs.New(rootPath)
+	wt := osfs.New(memPath)
 
 	repo, err := git.Open(storage, wt)
 	if err != nil {
@@ -61,22 +60,21 @@ func NewGitRepository(scope Scope) (*GitRepository, error) {
 	return &GitRepository{
 		repo:     repo,
 		worktree: worktree,
-		rootPath: rootPath,
 		memPath:  memPath,
 	}, nil
 }
 
 func InitRepository(scope Scope) error {
 	memPath := scope.MemPath
-	rootPath := scope.Path
 
 	if err := os.MkdirAll(memPath, 0755); err != nil {
 		return fmt.Errorf("create .mem directory: %w", err)
 	}
 
-	fs := osfs.New(memPath)
+	dotgit := filepath.Join(memPath, ".git")
+	fs := osfs.New(dotgit)
 	storage := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
-	wt := osfs.New(rootPath)
+	wt := osfs.New(memPath)
 
 	repo, err := git.Init(storage, wt)
 	if err != nil {
@@ -97,7 +95,7 @@ func InitRepository(scope Scope) error {
 		return fmt.Errorf("get worktree: %w", err)
 	}
 
-	readmePath := filepath.Join(rootPath, ".mem-init")
+	readmePath := filepath.Join(memPath, ".mem-init")
 	if err := os.WriteFile(readmePath, []byte("mem repository initialized\n"), 0644); err != nil {
 		return fmt.Errorf("write init file: %w", err)
 	}
@@ -158,7 +156,7 @@ func (r *GitRepository) Save(ctx context.Context, mem *Memory) error {
 		return fmt.Errorf("write file: %w", err)
 	}
 
-	relPath, err := filepath.Rel(r.rootPath, path)
+	relPath, err := filepath.Rel(r.memPath, path)
 	if err != nil {
 		return fmt.Errorf("get relative path: %w", err)
 	}
@@ -177,7 +175,7 @@ func (r *GitRepository) Delete(ctx context.Context, key Key) error {
 		return ErrNotFound
 	}
 
-	relPath, err := filepath.Rel(r.rootPath, path)
+	relPath, err := filepath.Rel(r.memPath, path)
 	if err != nil {
 		return fmt.Errorf("get relative path: %w", err)
 	}
@@ -192,21 +190,21 @@ func (r *GitRepository) Delete(ctx context.Context, key Key) error {
 func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, error) {
 	var memories []*Memory
 
-	err := filepath.Walk(r.rootPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(r.memPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
-			if info.Name() == ".mem" || info.Name() == ".mem-init" {
+			if info.Name() == ".git" || info.Name() == "vectors" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.Name() == ".mem-init" {
+		if info.Name() == ".mem-init" || info.Name() == "config.yaml" {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(r.rootPath, path)
+		relPath, err := filepath.Rel(r.memPath, path)
 		if err != nil {
 			return err
 		}
@@ -427,7 +425,7 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 	for path, s := range status {
 		switch {
 		case s.Staging == git.Added:
-			content, readErr := os.ReadFile(filepath.Join(r.rootPath, path))
+			content, readErr := os.ReadFile(filepath.Join(r.memPath, path))
 			if readErr != nil {
 				continue
 			}
@@ -443,7 +441,7 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 			if headErr != nil {
 				continue
 			}
-			newContent, readErr := os.ReadFile(filepath.Join(r.rootPath, path))
+			newContent, readErr := os.ReadFile(filepath.Join(r.memPath, path))
 			if readErr != nil {
 				continue
 			}
@@ -607,7 +605,7 @@ func (r *GitRepository) getFirstCommitTime(key Key, fallback time.Time) time.Tim
 }
 
 func (r *GitRepository) keyToPath(key Key) string {
-	return filepath.Join(r.rootPath, key.String())
+	return filepath.Join(r.memPath, key.String())
 }
 
 func (r *GitRepository) toCommit(c *object.Commit) *Commit {

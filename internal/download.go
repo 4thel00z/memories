@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	DefaultModelURL      = "https://huggingface.co/google/embeddinggemma-300M-Q4_K_M.gguf/resolve/main/embeddinggemma-300M-Q4_K_M.gguf"
-	DefaultModelFilename = "embeddinggemma-300M-Q4_K_M.gguf"
-	DefaultModelSize     = 200 * 1024 * 1024 // ~200MB approximate
+	DefaultModelURL      = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf"
+	DefaultModelFilename = "nomic-embed-text-v1.5.Q4_K_M.gguf"
+	DefaultModelSize     = 85 * 1024 * 1024
 )
 
 type ProgressWriter struct {
@@ -32,12 +32,14 @@ func (pw *ProgressWriter) Write(p []byte) (int, error) {
 
 type Downloader struct {
 	cacheDir string
+	token    string
 	client   *http.Client
 }
 
-func NewDownloader(cacheDir string) *Downloader {
+func NewDownloader(cacheDir, token string) *Downloader {
 	return &Downloader{
 		cacheDir: cacheDir,
+		token:    token,
 		client:   http.DefaultClient,
 	}
 }
@@ -64,6 +66,10 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
+	}
+
+	if d.token != "" {
+		req.Header.Set("Authorization", "Bearer "+d.token)
 	}
 
 	resp, err := d.client.Do(req)

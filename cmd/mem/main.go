@@ -82,9 +82,12 @@ func newApp() *app {
 				return
 			}
 
-			dl := internal.NewDownloader(cacheDir)
+			// Load config from resolved scope for model URL and token
+			modelURL, modelFilename, token := embeddingsFromConfig(resolver)
+
+			dl := internal.NewDownloader(cacheDir, token)
 			modelPath, err := dl.EnsureModel(context.Background(),
-				internal.DefaultModelURL, internal.DefaultModelFilename, nil)
+				modelURL, modelFilename, nil)
 			if err != nil {
 				slog.Warn("failed to download embedding model", "error", err)
 				return
@@ -148,4 +151,24 @@ func newApp() *app {
 		resolver: resolver,
 		uc:       uc,
 	}
+}
+
+func embeddingsFromConfig(resolver *internal.ScopeResolver) (modelURL, modelFilename, token string) {
+	modelURL = internal.DefaultModelURL
+	modelFilename = internal.DefaultModelFilename
+
+	scope := resolver.Resolve("")
+	cfg, err := internal.LoadConfig(scope)
+	if err != nil {
+		return
+	}
+
+	if cfg.Embeddings.ModelURL != "" {
+		modelURL = cfg.Embeddings.ModelURL
+	}
+	if cfg.Embeddings.Model != "" {
+		modelFilename = cfg.Embeddings.Model
+	}
+	token = cfg.Embeddings.Token
+	return
 }

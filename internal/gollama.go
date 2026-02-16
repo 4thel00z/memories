@@ -102,16 +102,36 @@ func (e *LocalEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 		return make([]float32, e.dimension), nil
 	}
 
-	batch := gollama.Batch_get_one(tokens)
+	gollama.Memory_clear(e.ctx, false)
+
+	nTokens := int32(len(tokens))
+	batch := gollama.Batch_init(nTokens, 0, 1)
 	defer gollama.Batch_free(batch)
+
+	tokenSlice := unsafe.Slice(batch.Token, nTokens)
+	posSlice := unsafe.Slice(batch.Pos, nTokens)
+	nSeqSlice := unsafe.Slice(batch.NSeqId, nTokens)
+	seqIdSlice := unsafe.Slice(batch.SeqId, nTokens)
+	logitsSlice := unsafe.Slice(batch.Logits, nTokens)
+
+	for i := int32(0); i < nTokens; i++ {
+		tokenSlice[i] = tokens[i]
+		posSlice[i] = gollama.LlamaPos(i)
+		nSeqSlice[i] = 1
+		*seqIdSlice[i] = 0
+		logitsSlice[i] = 1
+	}
+	batch.NTokens = nTokens
 
 	if err := gollama.Decode(e.ctx, batch); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 
-	embPtr := gollama.Get_embeddings(e.ctx)
+	// For pooled models (BERT/nomic-bert with mean pooling), retrieve the
+	// pooled embedding for sequence 0 via Get_embeddings_seq
+	embPtr := gollama.Get_embeddings_seq(e.ctx, 0)
 	if embPtr == nil {
-		return nil, fmt.Errorf("no embeddings returned")
+		return nil, fmt.Errorf("no embeddings returned (model may not support pooling)")
 	}
 
 	embeddings := ptrToSlice(embPtr, e.dimension)

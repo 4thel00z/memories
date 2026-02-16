@@ -246,7 +246,6 @@ type LlamaModelParams struct {
 
 // Context parameters
 type LlamaContextParams struct {
-	Seed              uint32               // RNG seed, -1 for random
 	NCtx              uint32               // text context, 0 = from model
 	NBatch            uint32               // logical maximum batch size
 	NUbatch           uint32               // physical maximum batch size
@@ -270,7 +269,6 @@ type LlamaContextParams struct {
 	TypeV             int32                // data type for V cache
 	AbortCallback     uintptr              // abort callback
 	AbortCallbackData uintptr              // user data for abort callback
-	Logits            uint8                // whether to compute and return logits (bool as uint8)
 	Embeddings        uint8                // whether to compute and return embeddings (bool as uint8)
 	Offload_kqv       uint8                // whether to offload K, Q, V to GPU (bool as uint8)
 	FlashAttn         uint8                // whether to use flash attention (bool as uint8)
@@ -374,6 +372,7 @@ var (
 	llamaGetLogitsIth     func(ctx LlamaContext, i int32) *float32
 	llamaGetEmbeddings    func(ctx LlamaContext) *float32
 	llamaGetEmbeddingsIth func(ctx LlamaContext, i int32) *float32
+	llamaGetEmbeddingsSeq func(ctx LlamaContext, seqId LlamaSeqId) *float32
 	llamaSetCausalAttn    func(ctx LlamaContext, causal bool) int32
 	llamaSetEmbeddings    func(ctx LlamaContext, embeddings bool)
 	llamaMemoryClear      func(memory LlamaMemory, reset bool) bool
@@ -501,7 +500,14 @@ func loadLibrary() error {
 	// Use platform-specific library loading
 	handle, err := loadLibraryPlatform(libPath)
 	if err != nil {
-		return fmt.Errorf("failed to load library %s: %w", libPath, err)
+		// Local load failed — try auto-download via the loader (pinned release)
+		if loaderErr := globalLoader.LoadLibraryWithVersion(LlamaCppBuild); loaderErr != nil {
+			return fmt.Errorf("failed to load library %s: %w (auto-download also failed: %v)", libPath, err, loaderErr)
+		}
+		handle = globalLoader.GetHandle()
+		if handle == 0 {
+			return fmt.Errorf("failed to load library %s: %w", libPath, err)
+		}
 	}
 
 	libHandle = handle
@@ -588,6 +594,7 @@ func registerFunctions() error {
 	registerLibFunc(&llamaGetLogitsIth, libHandle, "llama_get_logits_ith")
 	registerLibFunc(&llamaGetEmbeddings, libHandle, "llama_get_embeddings")
 	registerLibFunc(&llamaGetEmbeddingsIth, libHandle, "llama_get_embeddings_ith")
+	registerLibFunc(&llamaGetEmbeddingsSeq, libHandle, "llama_get_embeddings_seq")
 	registerLibFunc(&llamaSetCausalAttn, libHandle, "llama_set_causal_attn")
 	registerLibFunc(&llamaSetEmbeddings, libHandle, "llama_set_embeddings")
 	registerLibFunc(&llamaMemoryClear, libHandle, "llama_memory_clear")
@@ -718,7 +725,6 @@ func Context_default_params() LlamaContextParams {
 
 	// For non-Darwin platforms, return a default struct
 	return LlamaContextParams{
-		Seed:            LLAMA_DEFAULT_SEED,
 		NCtx:            0, // Auto-detect from model
 		NBatch:          2048,
 		NUbatch:         512,
@@ -729,7 +735,6 @@ func Context_default_params() LlamaContextParams {
 		PoolingType:     LLAMA_POOLING_TYPE_UNSPECIFIED,
 		AttentionType:   LLAMA_ATTENTION_TYPE_CAUSAL,
 		DefragThold:     -1.0, // Disabled by default
-		Logits:          0,    // Disabled by default
 		Embeddings:      0,    // Disabled by default
 		Offload_kqv:     1,    // Enable by default
 		FlashAttn:       0,    // Disabled by default
@@ -800,6 +805,14 @@ func Get_embeddings_ith(ctx LlamaContext, i int32) *float32 {
 		return nil
 	}
 	return llamaGetEmbeddingsIth(ctx, i)
+}
+
+// Get_embeddings_seq returns the pooled embeddings for a given sequence ID
+func Get_embeddings_seq(ctx LlamaContext, seqId LlamaSeqId) *float32 {
+	if err := ensureLoaded(); err != nil {
+		return nil
+	}
+	return llamaGetEmbeddingsSeq(ctx, seqId)
 }
 
 // Set_causal_attn sets whether to use causal attention
@@ -1010,6 +1023,23 @@ func Decode(ctx LlamaContext, batch LlamaBatch) error {
 	return nil
 }
 
+// Encode encodes a batch (for non-causal / embedding models like BERT)
+func Encode(ctx LlamaContext, batch LlamaBatch) error {
+	if err := ensureLoaded(); err != nil {
+		return err
+	}
+
+	if runtime.GOOS != "darwin" {
+		return errors.New("Encode not yet implemented for non-Darwin platforms")
+	}
+
+	result := llamaEncode(ctx, batch)
+	if result != 0 {
+		return fmt.Errorf("encode failed with code %d", result)
+	}
+	return nil
+}
+
 // Get_logits gets logits for all tokens
 func Get_logits(ctx LlamaContext) *float32 {
 	if err := ensureLoaded(); err != nil {
@@ -1197,7 +1227,6 @@ func ContextDefaultParams() LlamaContextParams {
 	}
 	// Return default values for non-Darwin platforms
 	return LlamaContextParams{
-		Seed:            LLAMA_DEFAULT_SEED,
 		NCtx:            0, // 0 = from model
 		NBatch:          2048,
 		NUbatch:         512,
@@ -1217,7 +1246,6 @@ func ContextDefaultParams() LlamaContextParams {
 		DefragThold:     -1.0,
 		TypeK:           -1,
 		TypeV:           -1,
-		Logits:          0,
 		Embeddings:      0,
 		Offload_kqv:     1,
 		FlashAttn:       0,

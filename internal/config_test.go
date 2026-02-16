@@ -12,8 +12,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Embeddings.Backend != "gollama" {
 		t.Errorf("expected backend 'gollama', got %q", cfg.Embeddings.Backend)
 	}
-	if cfg.Embeddings.Dimension != 384 {
-		t.Errorf("expected dimension 384, got %d", cfg.Embeddings.Dimension)
+	if cfg.Embeddings.Dimension != 768 {
+		t.Errorf("expected dimension 768, got %d", cfg.Embeddings.Dimension)
 	}
 	if cfg.Providers == nil {
 		t.Error("expected providers map to be initialized")

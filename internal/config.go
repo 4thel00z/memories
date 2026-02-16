@@ -10,6 +10,8 @@ import (
 type EmbeddingsConfig struct {
 	Backend   string `yaml:"backend"`
 	Model     string `yaml:"model"`
+	ModelURL  string `yaml:"model_url,omitempty"`
+	Token     string `yaml:"token,omitempty"`
 	Dimension int    `yaml:"dimension"`
 }
 
@@ -30,7 +32,8 @@ func DefaultConfig() *Config {
 		Embeddings: EmbeddingsConfig{
 			Backend:   "gollama",
 			Model:     DefaultModelFilename,
-			Dimension: 384,
+			ModelURL:  DefaultModelURL,
+			Dimension: 768,
 		},
 		Providers: make(map[string]ProviderConfig),
 	}
