@@ -11,7 +11,13 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupBranchTest(t *testing.T) *internal.BranchService {
+func setupBranchTest(t *testing.T) (
+	*internal.BranchCurrentUseCase,
+	*internal.BranchListUseCase,
+	*internal.BranchCreateUseCase,
+	*internal.BranchSwitchUseCase,
+	*internal.BranchDeleteUseCase,
+) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -33,13 +39,19 @@ func setupBranchTest(t *testing.T) *internal.BranchService {
 	}
 
 	resolver := internal.NewScopeResolver()
-	return internal.NewBranchService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	branchFor := func(s internal.Scope) (internal.BranchRepository, error) { return repo, nil }
+
+	return internal.NewBranchCurrentUseCase(resolver, branchFor),
+		internal.NewBranchListUseCase(resolver, branchFor),
+		internal.NewBranchCreateUseCase(resolver, branchFor),
+		internal.NewBranchSwitchUseCase(resolver, branchFor),
+		internal.NewBranchDeleteUseCase(resolver, branchFor)
 }
 
 func TestBranchCmdList(t *testing.T) {
-	svc := setupBranchTest(t)
+	currentUC, listUC, createUC, switchUC, deleteUC := setupBranchTest(t)
 
-	cmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	cmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -55,9 +67,9 @@ func TestBranchCmdList(t *testing.T) {
 }
 
 func TestBranchCmdCreateAndSwitch(t *testing.T) {
-	svc := setupBranchTest(t)
+	currentUC, listUC, createUC, switchUC, deleteUC := setupBranchTest(t)
 
-	cmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	cmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 	cmd.SetArgs([]string{"feature"})
 
 	var out bytes.Buffer
@@ -72,7 +84,7 @@ func TestBranchCmdCreateAndSwitch(t *testing.T) {
 	}
 
 	// Verify we're on the new branch
-	current, err := svc.Current(cmd.Context(), "")
+	current, err := currentUC.Execute(context.Background(), internal.BranchInput{})
 	if err != nil {
 		t.Fatalf("get current: %v", err)
 	}
@@ -82,10 +94,10 @@ func TestBranchCmdCreateAndSwitch(t *testing.T) {
 }
 
 func TestBranchCmdDelete(t *testing.T) {
-	svc := setupBranchTest(t)
+	currentUC, listUC, createUC, switchUC, deleteUC := setupBranchTest(t)
 
 	// Create a branch first
-	createCmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	createCmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 	createCmd.SetArgs([]string{"to-delete"})
 	var buf bytes.Buffer
 	createCmd.SetOut(&buf)
@@ -94,7 +106,7 @@ func TestBranchCmdDelete(t *testing.T) {
 	}
 
 	// Switch back to main so we can delete
-	switchCmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	switchCmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 	switchCmd.SetArgs([]string{"main"})
 	switchCmd.SetOut(&buf)
 	if err := switchCmd.Execute(); err != nil {
@@ -102,7 +114,7 @@ func TestBranchCmdDelete(t *testing.T) {
 	}
 
 	// Delete
-	delCmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	delCmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 	delCmd.SetArgs([]string{"-d", "to-delete"})
 	var out bytes.Buffer
 	delCmd.SetOut(&out)
@@ -117,15 +129,15 @@ func TestBranchCmdDelete(t *testing.T) {
 }
 
 func TestBranchCmdDeleteCurrentFails(t *testing.T) {
-	svc := setupBranchTest(t)
+	currentUC, listUC, createUC, switchUC, deleteUC := setupBranchTest(t)
 
 	// Try to delete current branch
-	current, err := svc.Current(context.Background(), "")
+	current, err := currentUC.Execute(context.Background(), internal.BranchInput{})
 	if err != nil {
 		t.Fatalf("get current: %v", err)
 	}
 
-	cmd := NewBranchCmd(func() *internal.BranchService { return svc })
+	cmd := NewBranchCmd(currentUC, listUC, createUC, switchUC, deleteUC)
 	cmd.SetArgs([]string{"-d", current.Name})
 
 	var out bytes.Buffer

@@ -10,7 +10,13 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupProviderTest(t *testing.T) *internal.ProviderService {
+func setupProviderTest(t *testing.T) (
+	*internal.ProviderListUseCase,
+	*internal.ProviderAddUseCase,
+	*internal.ProviderRemoveUseCase,
+	*internal.ProviderSetDefaultUseCase,
+	*internal.ProviderTestUseCase,
+) {
 	t.Helper()
 	tmpDir := t.TempDir()
 
@@ -39,13 +45,17 @@ func setupProviderTest(t *testing.T) *internal.ProviderService {
 	}
 
 	resolver := internal.NewScopeResolver()
-	return internal.NewProviderService(resolver)
+	return internal.NewProviderListUseCase(resolver),
+		internal.NewProviderAddUseCase(resolver),
+		internal.NewProviderRemoveUseCase(resolver),
+		internal.NewProviderSetDefaultUseCase(resolver),
+		internal.NewProviderTestUseCase(resolver)
 }
 
 func TestProviderListEmpty(t *testing.T) {
-	svc := setupProviderTest(t)
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
-	cmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	cmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	cmd.SetArgs([]string{"list"})
 
 	var out bytes.Buffer
@@ -61,10 +71,10 @@ func TestProviderListEmpty(t *testing.T) {
 }
 
 func TestProviderAddAndList(t *testing.T) {
-	svc := setupProviderTest(t)
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
 	// Add a provider
-	addCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	addCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	addCmd.SetArgs([]string{"add", "openai", "--api-key", "sk-test", "--model", "gpt-4"})
 	var addOut bytes.Buffer
 	addCmd.SetOut(&addOut)
@@ -78,7 +88,7 @@ func TestProviderAddAndList(t *testing.T) {
 	}
 
 	// List should show it
-	listCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	listCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	listCmd.SetArgs([]string{"list"})
 	var listOut bytes.Buffer
 	listCmd.SetOut(&listOut)
@@ -93,10 +103,10 @@ func TestProviderAddAndList(t *testing.T) {
 }
 
 func TestProviderRemove(t *testing.T) {
-	svc := setupProviderTest(t)
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
 	// Add then remove
-	addCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	addCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	addCmd.SetArgs([]string{"add", "todelete", "--api-key", "x"})
 	var buf bytes.Buffer
 	addCmd.SetOut(&buf)
@@ -104,7 +114,7 @@ func TestProviderRemove(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	rmCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	rmCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	rmCmd.SetArgs([]string{"remove", "todelete"})
 	var rmOut bytes.Buffer
 	rmCmd.SetOut(&rmOut)
@@ -119,10 +129,10 @@ func TestProviderRemove(t *testing.T) {
 }
 
 func TestProviderSetDefault(t *testing.T) {
-	svc := setupProviderTest(t)
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
 	// Add a provider first
-	addCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	addCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	addCmd.SetArgs([]string{"add", "myp", "--api-key", "x"})
 	var buf bytes.Buffer
 	addCmd.SetOut(&buf)
@@ -131,7 +141,7 @@ func TestProviderSetDefault(t *testing.T) {
 	}
 
 	// Set as default
-	defCmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	defCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	defCmd.SetArgs([]string{"default", "myp"})
 	var defOut bytes.Buffer
 	defCmd.SetOut(&defOut)
@@ -146,9 +156,9 @@ func TestProviderSetDefault(t *testing.T) {
 }
 
 func TestProviderSetDefaultNonexistent(t *testing.T) {
-	svc := setupProviderTest(t)
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
-	cmd := NewProviderCmd(func() *internal.ProviderService { return svc })
+	cmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
 	cmd.SetArgs([]string{"default", "nonexistent"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)

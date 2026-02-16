@@ -30,13 +30,11 @@ func TestSummarizeCmdNoProvider(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewSummarizeService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		nil, // no provider
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewSummarizeCmd(func() *internal.SummarizeService { return svc })
+	summarizeUC := internal.NewSummarizeUseCase(resolver, repoFor, nil)
+
+	cmd := NewSummarizeCmd(summarizeUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)

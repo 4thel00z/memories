@@ -47,15 +47,12 @@ func TestListCmd(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+
+	listUC := internal.NewListMemoriesUseCase(resolver, repoFor)
 
 	// List all
-	cmd := NewListCmd(func() *internal.MemoryService { return svc })
+	cmd := NewListCmd(listUC)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
@@ -103,14 +100,11 @@ func TestListCmdWithPrefix(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewListCmd(func() *internal.MemoryService { return svc })
+	listUC := internal.NewListMemoriesUseCase(resolver, repoFor)
+
+	cmd := NewListCmd(listUC)
 	cmd.SetArgs([]string{"foo"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -151,14 +145,11 @@ func TestListCmdEmpty(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewListCmd(func() *internal.MemoryService { return svc })
+	listUC := internal.NewListMemoriesUseCase(resolver, repoFor)
+
+	cmd := NewListCmd(listUC)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 

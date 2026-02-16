@@ -47,15 +47,14 @@ func TestDelCmd(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
+	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
-	cmd := NewDelCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	delUC := internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex)
+	commitUC := internal.NewCommitUseCase(resolver, histFor)
+
+	cmd := NewDelCmd(delUC, commitUC)
 	cmd.SetArgs([]string{"to-delete"})
 
 	var out bytes.Buffer
@@ -96,15 +95,14 @@ func TestDelCmdNotFound(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
+	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
-	cmd := NewDelCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	delUC := internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex)
+	commitUC := internal.NewCommitUseCase(resolver, histFor)
+
+	cmd := NewDelCmd(delUC, commitUC)
 	cmd.SetArgs([]string{"nonexistent"})
 
 	var out bytes.Buffer

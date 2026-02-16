@@ -11,7 +11,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupAddTest(t *testing.T) (*internal.GitRepository, *internal.MemoryService, *internal.HistoryService) {
+func setupAddTest(t *testing.T) (*internal.GitRepository, *internal.AddMemoryUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -33,21 +33,19 @@ func setupAddTest(t *testing.T) (*internal.GitRepository, *internal.MemoryServic
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
+	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
-	return repo, svc, hist
+	addUC := internal.NewAddMemoryUseCase(resolver, repoFor, histFor, nilIndex, nil, nil)
+
+	return repo, addUC
 }
 
 func TestAddCmdCreatesNew(t *testing.T) {
-	repo, svc, hist := setupAddTest(t)
+	repo, addUC := setupAddTest(t)
 
-	cmd := NewAddCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd := NewAddCmd(addUC)
 	cmd.SetArgs([]string{"new/key", "hello world"})
 
 	var out bytes.Buffer
@@ -66,13 +64,13 @@ func TestAddCmdCreatesNew(t *testing.T) {
 		t.Errorf("content = %q, want %q", string(mem.Content), "hello world")
 	}
 
-	if out.String() != "Created new/key\n" {
-		t.Errorf("output = %q, want %q", out.String(), "Created new/key\n")
+	if out.String() != "Appended to new/key\n" {
+		t.Errorf("output = %q, want %q", out.String(), "Appended to new/key\n")
 	}
 }
 
 func TestAddCmdAppendsExisting(t *testing.T) {
-	repo, svc, hist := setupAddTest(t)
+	repo, addUC := setupAddTest(t)
 
 	// Create initial memory
 	key, _ := internal.NewKey("existing")
@@ -90,7 +88,7 @@ func TestAddCmdAppendsExisting(t *testing.T) {
 	}
 
 	// Append via add command
-	cmd := NewAddCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd := NewAddCmd(addUC)
 	cmd.SetArgs([]string{"existing", "second"})
 
 	var out bytes.Buffer
@@ -116,10 +114,10 @@ func TestAddCmdAppendsExisting(t *testing.T) {
 }
 
 func TestAddCmdCreatesHistoryNode(t *testing.T) {
-	repo, svc, hist := setupAddTest(t)
+	repo, addUC := setupAddTest(t)
 
 	// Add first
-	cmd := NewAddCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd := NewAddCmd(addUC)
 	cmd.SetArgs([]string{"tracked", "version 1"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -128,7 +126,7 @@ func TestAddCmdCreatesHistoryNode(t *testing.T) {
 	}
 
 	// Add second
-	cmd2 := NewAddCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd2 := NewAddCmd(addUC)
 	cmd2.SetArgs([]string{"tracked", "version 2"})
 	cmd2.SetOut(&out)
 	if err := cmd2.Execute(); err != nil {

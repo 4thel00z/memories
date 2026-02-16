@@ -12,7 +12,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupDiffTest(t *testing.T) (*internal.GitRepository, *internal.HistoryService) {
+func setupDiffTest(t *testing.T) (*internal.GitRepository, *internal.DiffUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -34,15 +34,17 @@ func setupDiffTest(t *testing.T) (*internal.GitRepository, *internal.HistoryServ
 	}
 
 	resolver := internal.NewScopeResolver()
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 
-	return repo, hist
+	diffUC := internal.NewDiffUseCase(resolver, histFor)
+
+	return repo, diffUC
 }
 
 func TestDiffCmdNoChanges(t *testing.T) {
-	_, hist := setupDiffTest(t)
+	_, diffUC := setupDiffTest(t)
 
-	cmd := NewDiffCmd(func() *internal.HistoryService { return hist })
+	cmd := NewDiffCmd(diffUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -57,7 +59,7 @@ func TestDiffCmdNoChanges(t *testing.T) {
 }
 
 func TestDiffCmdWithChanges(t *testing.T) {
-	repo, hist := setupDiffTest(t)
+	repo, diffUC := setupDiffTest(t)
 
 	// Stage a file but don't commit — diff should show it
 	key, _ := internal.NewKey("diffme")
@@ -71,7 +73,7 @@ func TestDiffCmdWithChanges(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	cmd := NewDiffCmd(func() *internal.HistoryService { return hist })
+	cmd := NewDiffCmd(diffUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)

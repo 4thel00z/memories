@@ -44,14 +44,11 @@ func TestGetCmd(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewGetCmd(func() *internal.MemoryService { return svc })
+	getUC := internal.NewGetMemoryUseCase(resolver, repoFor)
+
+	cmd := NewGetCmd(getUC)
 	cmd.SetArgs([]string{"test/key"})
 
 	var out bytes.Buffer
@@ -87,14 +84,11 @@ func TestGetCmdNotFound(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewGetCmd(func() *internal.MemoryService { return svc })
+	getUC := internal.NewGetMemoryUseCase(resolver, repoFor)
+
+	cmd := NewGetCmd(getUC)
 	cmd.SetArgs([]string{"nonexistent"})
 
 	var out bytes.Buffer
@@ -139,14 +133,11 @@ func TestGetCmdJSON(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	svc := internal.NewMemoryService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
 
-	cmd := NewGetCmd(func() *internal.MemoryService { return svc })
+	getUC := internal.NewGetMemoryUseCase(resolver, repoFor)
+
+	cmd := NewGetCmd(getUC)
 	cmd.Root().PersistentFlags().Bool("json", false, "")
 	cmd.SetArgs([]string{"jsonkey", "--json"})
 

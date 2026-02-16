@@ -11,7 +11,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupCommitTest(t *testing.T) (*internal.GitRepository, *internal.HistoryService) {
+func setupCommitTest(t *testing.T) (*internal.GitRepository, *internal.CommitUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -33,13 +33,15 @@ func setupCommitTest(t *testing.T) (*internal.GitRepository, *internal.HistorySe
 	}
 
 	resolver := internal.NewScopeResolver()
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 
-	return repo, hist
+	commitUC := internal.NewCommitUseCase(resolver, histFor)
+
+	return repo, commitUC
 }
 
 func TestCommitCmd(t *testing.T) {
-	repo, hist := setupCommitTest(t)
+	repo, commitUC := setupCommitTest(t)
 
 	// Stage a change first
 	key, _ := internal.NewKey("commit-me")
@@ -53,7 +55,7 @@ func TestCommitCmd(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	cmd := NewCommitCmd(func() *internal.HistoryService { return hist })
+	cmd := NewCommitCmd(commitUC)
 	cmd.SetArgs([]string{"-m", "test: commit test"})
 
 	var out bytes.Buffer
@@ -87,12 +89,12 @@ func TestCommitCmd(t *testing.T) {
 }
 
 func TestCommitCmdNoMessage(t *testing.T) {
-	_, hist := setupCommitTest(t)
+	_, commitUC := setupCommitTest(t)
 
 	// Set EDITOR to false so it exits immediately with error
 	t.Setenv("EDITOR", "false")
 
-	cmd := NewCommitCmd(func() *internal.HistoryService { return hist })
+	cmd := NewCommitCmd(commitUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -105,9 +107,9 @@ func TestCommitCmdNoMessage(t *testing.T) {
 }
 
 func TestCommitCmdEmptyWorktree(t *testing.T) {
-	_, hist := setupCommitTest(t)
+	_, commitUC := setupCommitTest(t)
 
-	cmd := NewCommitCmd(func() *internal.HistoryService { return hist })
+	cmd := NewCommitCmd(commitUC)
 	cmd.SetArgs([]string{"-m", "empty commit"})
 
 	var out bytes.Buffer

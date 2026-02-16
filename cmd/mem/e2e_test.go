@@ -11,7 +11,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-// setupE2E initializes a full app with all services backed by a real git repo.
+// setupE2E initializes a full app with all use cases backed by a real git repo.
 func setupE2E(t *testing.T) (*app, *internal.GitRepository) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -41,17 +41,41 @@ func setupE2E(t *testing.T) (*app, *internal.GitRepository) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	repoFor := func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil }
-	indexFor := func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex }
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
+	branchFor := func(s internal.Scope) (internal.BranchRepository, error) { return repo, nil }
+	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
+
+	uc := &internal.UseCases{
+		SetMemory:      internal.NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil),
+		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
+		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex),
+		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
+		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, nilIndex, nil, nil),
+		Commit:         internal.NewCommitUseCase(resolver, histFor),
+		Log:            internal.NewLogUseCase(resolver, histFor),
+		Diff:           internal.NewDiffUseCase(resolver, histFor),
+		Revert:         internal.NewRevertUseCase(resolver, histFor),
+		KeywordSearch:  internal.NewKeywordSearchUseCase(resolver, repoFor),
+		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, nilIndex, nil),
+		RebuildIndex:   internal.NewRebuildIndexUseCase(resolver, repoFor, nilIndex, nil),
+		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, nil),
+		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, nil),
+		BranchCurrent:  internal.NewBranchCurrentUseCase(resolver, branchFor),
+		BranchList:     internal.NewBranchListUseCase(resolver, branchFor),
+		BranchCreate:   internal.NewBranchCreateUseCase(resolver, branchFor),
+		BranchSwitch:   internal.NewBranchSwitchUseCase(resolver, branchFor),
+		BranchDelete:   internal.NewBranchDeleteUseCase(resolver, branchFor),
+		ProviderList:   internal.NewProviderListUseCase(resolver),
+		ProviderAdd:    internal.NewProviderAddUseCase(resolver),
+		ProviderRemove: internal.NewProviderRemoveUseCase(resolver),
+		ProviderSetDef: internal.NewProviderSetDefaultUseCase(resolver),
+		ProviderTest:   internal.NewProviderTestUseCase(resolver),
+	}
 
 	a := &app{
-		resolver:     resolver,
-		memorySvc:    internal.NewMemoryService(resolver, repoFor, indexFor, nil),
-		historySvc:   internal.NewHistoryService(resolver, repoFor),
-		branchSvc:    internal.NewBranchService(resolver, repoFor),
-		searchSvc:    internal.NewSearchService(resolver, repoFor, indexFor, nil),
-		summarizeSvc: internal.NewSummarizeService(resolver, repoFor, nil),
-		providerSvc:  internal.NewProviderService(resolver),
+		resolver: resolver,
+		uc:       uc,
 	}
 	return a, repo
 }

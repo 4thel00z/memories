@@ -12,7 +12,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupSearchTest(t *testing.T) *internal.SearchService {
+func setupSearchTest(t *testing.T) (*internal.KeywordSearchUseCase, *internal.SemanticSearchUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -55,18 +55,19 @@ func setupSearchTest(t *testing.T) *internal.SearchService {
 	}
 
 	resolver := internal.NewScopeResolver()
-	return internal.NewSearchService(
-		resolver,
-		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
-		nil,
-	)
+	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
+	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
+
+	keywordUC := internal.NewKeywordSearchUseCase(resolver, repoFor)
+	semanticUC := internal.NewSemanticSearchUseCase(resolver, nilIndex, nil)
+
+	return keywordUC, semanticUC
 }
 
 func TestSearchCmdKeyword(t *testing.T) {
-	svc := setupSearchTest(t)
+	keywordUC, semanticUC := setupSearchTest(t)
 
-	cmd := NewSearchCmd(func() *internal.SearchService { return svc })
+	cmd := NewSearchCmd(keywordUC, semanticUC)
 	cmd.SetArgs([]string{"milk"})
 
 	var out bytes.Buffer
@@ -83,9 +84,9 @@ func TestSearchCmdKeyword(t *testing.T) {
 }
 
 func TestSearchCmdKeywordNoMatch(t *testing.T) {
-	svc := setupSearchTest(t)
+	keywordUC, semanticUC := setupSearchTest(t)
 
-	cmd := NewSearchCmd(func() *internal.SearchService { return svc })
+	cmd := NewSearchCmd(keywordUC, semanticUC)
 	cmd.SetArgs([]string{"zzzznonexistent"})
 
 	var out bytes.Buffer
@@ -101,9 +102,9 @@ func TestSearchCmdKeywordNoMatch(t *testing.T) {
 }
 
 func TestSearchCmdKeywordMatchesKey(t *testing.T) {
-	svc := setupSearchTest(t)
+	keywordUC, semanticUC := setupSearchTest(t)
 
-	cmd := NewSearchCmd(func() *internal.SearchService { return svc })
+	cmd := NewSearchCmd(keywordUC, semanticUC)
 	cmd.SetArgs([]string{"meeting"})
 
 	var out bytes.Buffer
@@ -120,9 +121,9 @@ func TestSearchCmdKeywordMatchesKey(t *testing.T) {
 }
 
 func TestSearchCmdSemanticNoEmbedder(t *testing.T) {
-	svc := setupSearchTest(t)
+	keywordUC, semanticUC := setupSearchTest(t)
 
-	cmd := NewSearchCmd(func() *internal.SearchService { return svc })
+	cmd := NewSearchCmd(keywordUC, semanticUC)
 	cmd.SetArgs([]string{"-s", "installation"})
 
 	var out bytes.Buffer

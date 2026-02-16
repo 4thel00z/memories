@@ -12,7 +12,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupLogTest(t *testing.T) (*internal.GitRepository, *internal.HistoryService) {
+func setupLogTest(t *testing.T) (*internal.GitRepository, *internal.LogUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -51,15 +51,17 @@ func setupLogTest(t *testing.T) (*internal.GitRepository, *internal.HistoryServi
 	}
 
 	resolver := internal.NewScopeResolver()
-	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 
-	return repo, hist
+	logUC := internal.NewLogUseCase(resolver, histFor)
+
+	return repo, logUC
 }
 
 func TestLogCmd(t *testing.T) {
-	_, hist := setupLogTest(t)
+	_, logUC := setupLogTest(t)
 
-	cmd := NewLogCmd(func() *internal.HistoryService { return hist })
+	cmd := NewLogCmd(logUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -78,9 +80,9 @@ func TestLogCmd(t *testing.T) {
 }
 
 func TestLogCmdOneline(t *testing.T) {
-	_, hist := setupLogTest(t)
+	_, logUC := setupLogTest(t)
 
-	cmd := NewLogCmd(func() *internal.HistoryService { return hist })
+	cmd := NewLogCmd(logUC)
 	cmd.SetArgs([]string{"--oneline"})
 
 	var out bytes.Buffer
@@ -105,9 +107,9 @@ func TestLogCmdOneline(t *testing.T) {
 }
 
 func TestLogCmdLimit(t *testing.T) {
-	_, hist := setupLogTest(t)
+	_, logUC := setupLogTest(t)
 
-	cmd := NewLogCmd(func() *internal.HistoryService { return hist })
+	cmd := NewLogCmd(logUC)
 	cmd.SetArgs([]string{"-n", "2", "--oneline"})
 
 	var out bytes.Buffer

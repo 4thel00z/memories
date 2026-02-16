@@ -31,9 +31,11 @@ func TestStatusCmd(t *testing.T) {
 	}
 
 	resolver := internal.NewScopeResolver()
-	branchSvc := internal.NewBranchService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
+	branchFor := func(s internal.Scope) (internal.BranchRepository, error) { return repo, nil }
 
-	cmd := NewStatusCmd(func() *internal.BranchService { return branchSvc })
+	currentUC := internal.NewBranchCurrentUseCase(resolver, branchFor)
+
+	cmd := NewStatusCmd(currentUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
