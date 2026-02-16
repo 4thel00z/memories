@@ -47,7 +47,7 @@ func TestGetCmd(t *testing.T) {
 	svc := internal.NewMemoryService(
 		resolver,
 		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, nil },
+		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
 		nil,
 	)
 
@@ -90,7 +90,7 @@ func TestGetCmdNotFound(t *testing.T) {
 	svc := internal.NewMemoryService(
 		resolver,
 		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, nil },
+		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
 		nil,
 	)
 
@@ -142,7 +142,7 @@ func TestGetCmdJSON(t *testing.T) {
 	svc := internal.NewMemoryService(
 		resolver,
 		func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil },
-		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, nil },
+		func(s internal.Scope) (*internal.AnnoyIndex, error) { return nil, internal.ErrNoIndex },
 		nil,
 	)
 

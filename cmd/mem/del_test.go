@@ -2,14 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/4thel00z/memories/internal"
 )
 
-func TestSetCmd(t *testing.T) {
+func TestDelCmd(t *testing.T) {
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
 		Type:    internal.ScopeProject,
@@ -29,6 +31,21 @@ func TestSetCmd(t *testing.T) {
 		t.Fatalf("new repo: %v", err)
 	}
 
+	// Create a memory to delete
+	key, _ := internal.NewKey("to-delete")
+	mem := &internal.Memory{
+		Key:       key,
+		Content:   []byte("will be deleted"),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := repo.Save(context.Background(), mem); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if _, err := repo.Commit(context.Background(), "test: add memory to delete"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
 	resolver := internal.NewScopeResolver()
 	svc := internal.NewMemoryService(
 		resolver,
@@ -38,8 +55,8 @@ func TestSetCmd(t *testing.T) {
 	)
 	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
 
-	cmd := NewSetCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
-	cmd.SetArgs([]string{"test/key", "test value"})
+	cmd := NewDelCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd.SetArgs([]string{"to-delete"})
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -48,18 +65,17 @@ func TestSetCmd(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// Verify the memory was created
-	mem, err := repo.Get(cmd.Context(), internal.Key("test/key"))
+	// Verify deleted
+	exists, err := repo.Exists(context.Background(), key)
 	if err != nil {
-		t.Fatalf("get memory: %v", err)
+		t.Fatalf("exists check: %v", err)
 	}
-
-	if string(mem.Content) != "test value" {
-		t.Errorf("content = %q, want %q", string(mem.Content), "test value")
+	if exists {
+		t.Error("memory still exists after delete")
 	}
 }
 
-func TestSetCmdOverwrite(t *testing.T) {
+func TestDelCmdNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
 		Type:    internal.ScopeProject,
@@ -88,29 +104,15 @@ func TestSetCmdOverwrite(t *testing.T) {
 	)
 	hist := internal.NewHistoryService(resolver, func(s internal.Scope) (*internal.GitRepository, error) { return repo, nil })
 
-	// Set initial value
-	cmd := NewSetCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
-	cmd.SetArgs([]string{"mykey", "first"})
+	cmd := NewDelCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
+	cmd.SetArgs([]string{"nonexistent"})
+
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("first set: %v", err)
-	}
+	cmd.SetErr(&out)
 
-	// Overwrite
-	cmd2 := NewSetCmd(func() *internal.MemoryService { return svc }, func() *internal.HistoryService { return hist })
-	cmd2.SetArgs([]string{"mykey", "second"})
-	cmd2.SetOut(&out)
-	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("second set: %v", err)
-	}
-
-	mem, err := repo.Get(cmd.Context(), internal.Key("mykey"))
-	if err != nil {
-		t.Fatalf("get memory: %v", err)
-	}
-
-	if string(mem.Content) != "second" {
-		t.Errorf("content = %q, want %q", string(mem.Content), "second")
+	err = cmd.Execute()
+	if err == nil {
+		t.Error("expected error for nonexistent key")
 	}
 }

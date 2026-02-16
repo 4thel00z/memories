@@ -11,6 +11,7 @@ var (
 	ErrNotFound      = errors.New("memory not found")
 	ErrAlreadyExists = errors.New("memory already exists")
 	ErrInvalidKey    = errors.New("invalid key")
+	ErrNoIndex       = errors.New("no vector index available")
 )
 
 var keyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
