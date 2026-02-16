@@ -159,8 +159,8 @@ Configuration lives in `.mem/config.yaml`:
 ```yaml
 embeddings:
   backend: gollama
-  model: embeddinggemma-300M-Q4_K_M.gguf
-  dimension: 256
+  model: nomic-embed-text-v1.5.Q4_K_M.gguf
+  dimension: 768
 
 providers:
   openrouter:
@@ -293,6 +293,27 @@ func main() {
     ├── index.ann    # Annoy vector index
     └── mapping.json # Key-to-ID mapping
 ```
+
+## Claude Code Skill
+
+mem ships with a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code/skills) that teaches Claude to recall and store memories automatically during coding sessions.
+
+### Install the skill
+
+```bash
+# From your project root (where .claude/ lives)
+mkdir -p .claude/skills
+cp -r skills/using-mem .claude/skills/using-mem
+```
+
+Or symlink it so it stays in sync with upstream:
+
+```bash
+mkdir -p .claude/skills
+ln -s "$(pwd)/skills/using-mem" .claude/skills/using-mem
+```
+
+Once installed, Claude Code will automatically recall relevant memories at session start and store decisions at milestones. Run `/skill using-mem` to invoke it manually.
 
 ## Development
 
