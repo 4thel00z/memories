@@ -1,0 +1,98 @@
+---
+name: using-mem
+description: Use when starting a coding session, making design decisions, fixing bugs, or when the user asks to remember or recall something — manages persistent memory via the mem CLI across project and global scopes
+---
+
+# Using mem
+
+## Overview
+
+Use the `mem` CLI to persist knowledge across sessions. **Recall before working, store at milestones.** mem is a Git-powered key-value store with branching, history, and semantic search.
+
+## Recall Phase (Session Start)
+
+Before touching code, load relevant context:
+
+```bash
+mem status                              # verify mem is initialized
+mem list arch/                          # architecture decisions
+mem list bugs/                          # known bug patterns
+mem list onboard/                       # onboarding context
+mem list ctx/                           # project context
+mem search -s "<your current task>" -n 5  # semantic search (if embedder available)
+mem list prefs/ --scope global          # user preferences
+```
+
+Read anything relevant with `mem get <key>`. Synthesize into working knowledge before proceeding.
+
+**If mem is not initialized:** `mem init` to create a project-local `.mem/` store, or `mem init --global` for `~/.mem`.
+
+**If semantic search fails with "embedder not available":** The embedding model could not be loaded. Fall back to keyword search (`mem search "<query>"` without `-s`). To fix: ensure the GGUF embedding model is downloaded to `~/Library/Caches/mem/models/` and the `.mem/config.yaml` points to it. The default model (`nomic-embed-text-v1.5`) is public and requires no token.
+
+## Store Phase (At Milestones)
+
+After a design decision, bug fix, pattern discovery, or on user request:
+
+1. Pick the right prefix and scope from the table below
+2. `mem set <prefix>/<kebab-case-topic> "<concise content>"` (auto-commits)
+3. For batch changes, use `mem commit -m "remember: <brief description>"` after multiple edits
+4. If semantic search is configured: `mem index rebuild`
+
+## Key Convention
+
+| Prefix | Scope | When |
+|--------|-------|------|
+| `arch/` | project | Architecture/design decisions |
+| `bugs/` | project | Bug patterns, root causes, fixes |
+| `ctx/` | project | Project context, deps, structure |
+| `onboard/` | project | Knowledge for new contributors/agents |
+| `prefs/` | global | User preferences, coding style |
+| `patterns/` | global | Cross-project reusable patterns |
+
+For global scope, add `--scope global` to set/get/list commands.
+
+## Content Format
+
+Store concise, actionable statements — not narratives.
+
+**Architecture:** Decision, rationale, alternatives rejected, date.
+**Bugs:** Symptom, root cause, fix, what to watch for.
+**Context:** Concise factual description.
+**Onboarding:** What a new contributor needs to know, key file paths.
+**Preferences:** Concise preference statement.
+
+## Quick Reference
+
+| Action | Command |
+|--------|---------|
+| Store memory | `mem set bugs/nil-config "LoadConfig panics on empty file. Fix: nil check after unmarshal."` |
+| Read memory | `mem get bugs/nil-config` |
+| List by prefix | `mem list arch/` |
+| Semantic search | `mem search -s "authentication flow" -n 5` |
+| Keyword search | `mem search "config"` |
+| Commit | `mem commit -m "remember: nil-config bug pattern"` |
+| Delete | `mem del ctx/outdated-info` |
+| Global scope | `mem set prefs/style "prefer table-driven tests" --scope global` |
+| Rebuild index | `mem index rebuild` (after storing, if semantic search is configured) |
+
+## Red Flags — STOP and Check mem
+
+These thoughts mean you're skipping the recall phase:
+
+| Thought | Reality |
+|---------|---------|
+| "Let me go straight to the code" | Check mem first. 30 seconds to recall saves hours. |
+| "This is a quick fix, no need to store" | Quick fixes reveal patterns. Store the pattern. |
+| "I'll remember this for next time" | You won't. You're a new instance each session. Store it. |
+| "Not sure what key to use" | Use the prefix table above. Pick the closest match. |
+| "I'll store it later" | You'll forget. Store at the milestone, not after. |
+| "Production is down, skip recall" | 30 seconds of recall is cheap insurance against a bad fix. |
+| "mem is empty, nobody uses it" | Every store starts at zero. You break the cycle or perpetuate it. |
+
+## Common Mistakes
+
+- **Skipping recall entirely** — Always run the recall phase commands at session start
+- **Storing narratives** — Store "what + why" not "here's what happened in session X"
+- **Wrong scope** — Project-specific knowledge stays project scope; only cross-project patterns and user preferences go global
+- **Forgetting index rebuild** — After storing memories, run `mem index rebuild` if semantic search is configured
+- **Ignoring "embedder not available"** — If semantic search fails, fall back to keyword search and note the issue. Don't silently skip recall.
