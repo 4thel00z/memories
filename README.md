@@ -128,6 +128,17 @@ mem branch main
 | `mem index rebuild` | Rebuild the vector search index |
 | `mem index status` | Show index statistics |
 
+### Git Hooks
+
+| Command | Description |
+|---------|-------------|
+| `mem install` | Install a post-commit hook for automatic memory updates |
+| `mem install --strategy <s>` | Set strategy: `extract`, `summarize`, `script`, or `all` |
+| `mem install --force` | Overwrite existing hook (backs up original to `.bak`) |
+| `mem install --script <path>` | Path to custom script (for `script` or `all` strategy) |
+| `mem uninstall` | Remove the mem post-commit hook (restores backup if present) |
+| `mem uninstall --keep-config` | Remove hook but keep config in `.mem/config.yaml` |
+
 ### Skills
 
 | Command | Description |
@@ -175,7 +186,46 @@ providers:
     model: anthropic/claude-sonnet-4-20250514
 
 default_provider: openrouter
+
+hooks:
+  post-commit:
+    enabled: true
+    strategy: extract        # extract | summarize | script | all
+    script: ./my-hook.sh     # only used with strategy=script or all
+    key_prefix: hooks/commits
+    quiet: false
 ```
+
+## Git Hooks
+
+`mem install` adds a thin post-commit hook to `.git/hooks/post-commit` that calls `mem hook run post-commit` after every commit. The hook inspects the diff and stores structured information in memory automatically.
+
+### Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `extract` | Regex-based parsing: detects new/removed files, functions, types, config changes. No LLM needed. |
+| `summarize` | Sends the diff to a configured LLM provider for a 1-3 sentence summary. |
+| `script` | Runs a user-defined script with `MEM_COMMIT_HASH`, `MEM_COMMIT_MSG`, `MEM_COMMIT_AUTHOR` env vars and the diff on stdin. |
+| `all` | Runs extract + summarize + script (if configured) in sequence. |
+
+### Example
+
+```bash
+# Install with default extract strategy
+mem install
+
+# Install with all strategies and a custom script
+mem install --strategy all --script ./hooks/post-commit-custom.sh
+
+# Overwrite an existing hook (backs up to post-commit.bak)
+mem install --force
+
+# Remove the hook (restores original if backed up)
+mem uninstall
+```
+
+After installation, memories are stored under `hooks/commits/<short-hash>` and the vector index is rebuilt asynchronously.
 
 ## Public API
 
