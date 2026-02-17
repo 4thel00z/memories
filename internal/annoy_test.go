@@ -115,6 +115,94 @@ func TestAnnoyIndexSearchBeforeBuild(t *testing.T) {
 	}
 }
 
+func TestAnnoyIndexAddAfterBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	dim := 3
+	ctx := context.Background()
+
+	idx, err := NewAnnoyIndex(tmpDir, dim)
+	if err != nil {
+		t.Fatalf("new index: %v", err)
+	}
+
+	key1, _ := NewKey("doc/one")
+	if err := idx.Add(ctx, key1, Embedding{Vector: []float32{1.0, 0.0, 0.0}}); err != nil {
+		t.Fatalf("add key1: %v", err)
+	}
+	if err := idx.Build(ctx, 2); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	// Add after build — must not panic
+	key2, _ := NewKey("doc/two")
+	if err := idx.Add(ctx, key2, Embedding{Vector: []float32{0.0, 1.0, 0.0}}); err != nil {
+		t.Fatalf("add after build: %v", err)
+	}
+
+	if err := idx.Build(ctx, 2); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	results, err := idx.Search(ctx, Embedding{Vector: []float32{0.0, 1.0, 0.0}}, 2)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Key.String() != "doc/two" {
+		t.Errorf("expected closest to be 'doc/two', got %q", results[0].Key.String())
+	}
+}
+
+func TestAnnoyIndexAddAfterLoad(t *testing.T) {
+	tmpDir := t.TempDir()
+	dim := 3
+	ctx := context.Background()
+
+	// Build and save an index
+	idx1, err := NewAnnoyIndex(tmpDir, dim)
+	if err != nil {
+		t.Fatalf("new index: %v", err)
+	}
+	key1, _ := NewKey("doc/one")
+	if err := idx1.Add(ctx, key1, Embedding{Vector: []float32{1.0, 0.0, 0.0}}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := idx1.Build(ctx, 2); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := idx1.Save(ctx); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Load into a new index and add — must not panic
+	idx2, err := NewAnnoyIndex(tmpDir, dim)
+	if err != nil {
+		t.Fatalf("new index 2: %v", err)
+	}
+	if err := idx2.Load(ctx); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	key2, _ := NewKey("doc/two")
+	if err := idx2.Add(ctx, key2, Embedding{Vector: []float32{0.0, 1.0, 0.0}}); err != nil {
+		t.Fatalf("add after load: %v", err)
+	}
+
+	if err := idx2.Build(ctx, 2); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	results, err := idx2.Search(ctx, Embedding{Vector: []float32{0.0, 1.0, 0.0}}, 2)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
 func TestAnnoyIndexSaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	dim := 3

@@ -68,6 +68,23 @@ func (a *AnnoyIndex) Add(ctx context.Context, key Key, emb Embedding) error {
 		return fmt.Errorf("dimension mismatch: expected %d, got %d", a.dimension, len(emb.Vector))
 	}
 
+	// Annoy doesn't allow AddItem after Build/Load. Recreate the index and
+	// copy all existing vectors so we can keep adding.
+	if a.built {
+		old := a.idx
+		fresh := builder.Index[float32, uint32]().
+			AngularDistance(a.dimension).
+			UseMultiWorkerPolicy().
+			MmapIndexAllocator().
+			Build()
+		for id := range a.idToKey {
+			fresh.AddItem(id, old.GetItem(id))
+		}
+		_ = old.Close()
+		a.idx = fresh
+		a.built = false
+	}
+
 	keyStr := key.String()
 
 	id, exists := a.keyToID[keyStr]
@@ -80,7 +97,6 @@ func (a *AnnoyIndex) Add(ctx context.Context, key Key, emb Embedding) error {
 
 	a.idx.AddItem(id, emb.Vector)
 	a.dirty = true
-	a.built = false
 
 	return nil
 }
