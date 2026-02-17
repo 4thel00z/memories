@@ -12,7 +12,9 @@
 Store key-value memories in a Git repository, with branching, history, diffing,
 and commit semantics. Optionally add vector-based semantic search via local embeddings.
 
-[Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Public API](#public-api) · [Extensibility](#extensibility) · [Claude Code Skill](#claude-code-skill)
+[Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Git Hooks](#git-hooks) · [Public API](#public-api) · [Extensibility](#extensibility) · [Claude Code Skill](#claude-code-skill)
+
+![mem demo](assets/demo.gif)
 
 </div>
 
