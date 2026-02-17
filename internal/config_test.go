@@ -115,6 +115,61 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	}
 }
 
+func TestConfigHooksRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	memPath := filepath.Join(tmpDir, ".mem")
+	if err := os.MkdirAll(memPath, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	scope := Scope{
+		Type:    ScopeProject,
+		Path:    tmpDir,
+		MemPath: memPath,
+	}
+
+	cfg := DefaultConfig()
+	cfg.Hooks = HooksConfig{
+		PostCommit: PostCommitHookConfig{
+			Enabled:   true,
+			Scope:     "project",
+			Strategy:  "all",
+			Script:    "./my-hook.sh",
+			KeyPrefix: "hooks/commits",
+			Quiet:     false,
+		},
+	}
+
+	if err := SaveConfig(scope, cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadConfig(scope)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	hook := loaded.Hooks.PostCommit
+	if hook.Enabled != true {
+		t.Errorf("Enabled = %v, want true", hook.Enabled)
+	}
+	if hook.Scope != "project" {
+		t.Errorf("Scope = %q, want %q", hook.Scope, "project")
+	}
+	if hook.Strategy != "all" {
+		t.Errorf("Strategy = %q, want %q", hook.Strategy, "all")
+	}
+	if hook.Script != "./my-hook.sh" {
+		t.Errorf("Script = %q, want %q", hook.Script, "./my-hook.sh")
+	}
+	if hook.KeyPrefix != "hooks/commits" {
+		t.Errorf("KeyPrefix = %q, want %q", hook.KeyPrefix, "hooks/commits")
+	}
+	if hook.Quiet != false {
+		t.Errorf("Quiet = %v, want false", hook.Quiet)
+	}
+}
+
 func TestConfigDefaultValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	memPath := filepath.Join(tmpDir, ".mem")

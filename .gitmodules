@@ -1,0 +1,6 @@
+[submodule "deps/gollama.cpp"]
+	path = deps/gollama.cpp
+	url = https://github.com/4thel00z/gollama.cpp.git
+[submodule "deps/goannoy"]
+	path = deps/goannoy
+	url = https://github.com/4thel00z/goannoy.git

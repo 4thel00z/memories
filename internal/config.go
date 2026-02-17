@@ -33,10 +33,24 @@ type ProviderConfig struct {
 	Model   string `yaml:"model"`
 }
 
+type PostCommitHookConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Scope     string `yaml:"scope,omitempty"`
+	Strategy  string `yaml:"strategy,omitempty"`
+	Script    string `yaml:"script,omitempty"`
+	KeyPrefix string `yaml:"key_prefix,omitempty"`
+	Quiet     bool   `yaml:"quiet,omitempty"`
+}
+
+type HooksConfig struct {
+	PostCommit PostCommitHookConfig `yaml:"post-commit"`
+}
+
 type Config struct {
 	Embeddings      EmbeddingsConfig          `yaml:"embeddings"`
 	Providers       map[string]ProviderConfig `yaml:"providers,omitempty"`
 	DefaultProvider string                    `yaml:"default_provider,omitempty"`
+	Hooks           HooksConfig               `yaml:"hooks,omitempty"`
 }
 
 func DefaultConfig() *Config {
