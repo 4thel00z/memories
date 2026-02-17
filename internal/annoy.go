@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/mariotoffia/goannoy/builder"
-	"github.com/mariotoffia/goannoy/interfaces"
+	"github.com/4thel00z/goannoy/builder"
+	"github.com/4thel00z/goannoy/interfaces"
 )
 
 const (

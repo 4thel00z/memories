@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/dianlight/gollama.cpp"
+	"github.com/4thel00z/gollama.cpp"
 )
 
 var _ Embedder = (*LocalEmbedder)(nil)
