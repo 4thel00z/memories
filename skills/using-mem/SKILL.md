@@ -62,12 +62,29 @@ Store concise, actionable statements — not narratives.
 **Onboarding:** What a new contributor needs to know, key file paths.
 **Preferences:** Concise preference statement.
 
+## Seeding Memories
+
+When starting a new project or onboarding, bulk-load context into mem:
+
+```bash
+mem init                                            # if not yet initialized
+mem set ctx/architecture "Go CLI with cobra..."
+mem set ctx/deps "Vendored deps, do not run go mod vendor"
+mem set arch/auth "JWT-based, refresh tokens in httpOnly cookies"
+mem set prefs/style "table-driven tests" --scope global
+```
+
+This gives future sessions immediate context without manual recall.
+
 ## Git Hook Integration
 
 `mem install` adds a post-commit hook that automatically captures structural changes from every commit into memory. This builds a project changelog without manual effort.
 
+**Prerequisite:** The project must have a `.git/` directory (`git init` if needed).
+
 ```bash
 # Install the hook (default: extract strategy, no LLM needed)
+git init                                            # if no .git/ exists yet
 mem install
 
 # Install with all strategies (extract + LLM summarize + custom script)
@@ -109,7 +126,9 @@ mem get hooks/commits/<hash>
 | Delete | `mem del ctx/outdated-info` |
 | Global scope | `mem set prefs/style "prefer table-driven tests" --scope global` |
 | Rebuild index | `mem index rebuild` (after storing, if semantic search is configured) |
-| Install hook | `mem install` (auto-capture commit changes) |
+| Seed context | `mem set ctx/topic "concise description"` |
+| Install skill | `mem skill install` (bundled, no network) |
+| Install hook | `mem install` (requires `.git/`; auto-capture commit changes) |
 | Uninstall hook | `mem uninstall` |
 | List hook memories | `mem list hooks/commits/` |
 
