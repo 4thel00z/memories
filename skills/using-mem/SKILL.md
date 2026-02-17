@@ -11,21 +11,26 @@ Use the `mem` CLI to persist knowledge across sessions. **Recall before working,
 
 ## Recall Phase (Session Start)
 
-Before touching code, load relevant context:
+Before touching code, ensure stores exist and load relevant context:
 
 ```bash
-mem status                              # verify mem is initialized
+# Ensure both stores exist
+mem status || mem init                  # project-local .mem/
+test -d ~/.mem || mem init --global     # global ~/.mem
+
+# Load project context
 mem list arch/                          # architecture decisions
 mem list bugs/                          # known bug patterns
 mem list onboard/                       # onboarding context
 mem list ctx/                           # project context
 mem search -s "<your current task>" -n 5  # semantic search (if embedder available)
+
+# Load global context
 mem list prefs/ --scope global          # user preferences
+mem list patterns/ --scope global       # cross-project patterns
 ```
 
 Read anything relevant with `mem get <key>`. Synthesize into working knowledge before proceeding.
-
-**If mem is not initialized:** `mem init` to create a project-local `.mem/` store, or `mem init --global` for `~/.mem`.
 
 **If semantic search fails with "embedder not available":** The embedding model could not be loaded. Fall back to keyword search (`mem search "<query>"` without `-s`). To fix: ensure the GGUF embedding model is downloaded to `~/Library/Caches/mem/models/` and the `.mem/config.yaml` points to it. The default model (`nomic-embed-text-v1.5`) is public and requires no token.
 
