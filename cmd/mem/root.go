@@ -33,6 +33,7 @@ func addPersistentFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("scope", "", "Target scope (global|project)")
 	cmd.PersistentFlags().String("branch", "", "Target branch")
 	cmd.PersistentFlags().Bool("json", false, "Output in JSON format")
+	cmd.PersistentFlags().Bool("debug", false, "Enable verbose output (e.g. model loading logs)")
 }
 
 func addSubcommands(root *cobra.Command, a *app) {
@@ -55,6 +56,7 @@ func addSubcommands(root *cobra.Command, a *app) {
 		NewSummarizeCmd(uc.Summarize),
 		NewEditCmd(uc.GetMemory, uc.SetMemory, uc.Commit),
 		NewWatchCmd(uc.Commit),
+		NewSkillCmd(),
 	)
 }
 

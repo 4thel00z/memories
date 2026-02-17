@@ -7,6 +7,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// EmbedderOption configures the local embedder.
+type EmbedderOption func(*embedderConfig)
+
+type embedderConfig struct {
+	debug bool
+}
+
+// WithDebug enables verbose llama.cpp model-loading output.
+func WithDebug() EmbedderOption {
+	return func(c *embedderConfig) { c.debug = true }
+}
+
 type EmbeddingsConfig struct {
 	Backend   string `yaml:"backend"`
 	Model     string `yaml:"model"`

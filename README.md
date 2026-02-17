@@ -12,7 +12,7 @@
 Store key-value memories in a Git repository, with branching, history, diffing,
 and commit semantics. Optionally add vector-based semantic search via local embeddings.
 
-[Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Public API](#public-api) · [Plugins](#extensibility)
+[Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Public API](#public-api) · [Extensibility](#extensibility) · [Claude Code Skill](#claude-code-skill)
 
 </div>
 
@@ -127,6 +127,12 @@ mem branch main
 |---------|-------------|
 | `mem index rebuild` | Rebuild the vector search index |
 | `mem index status` | Show index statistics |
+
+### Skills
+
+| Command | Description |
+|---------|-------------|
+| `mem skill install` | Install the using-mem Claude Code skill |
 
 ### Other
 
@@ -302,18 +308,12 @@ mem ships with a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-c
 
 ```bash
 # From your project root (where .claude/ lives)
-mkdir -p .claude/skills
-cp -r skills/using-mem .claude/skills/using-mem
+mem skill install
 ```
 
-Or symlink it so it stays in sync with upstream:
+This downloads the latest `using-mem` skill into `.claude/skills/using-mem/SKILL.md`.
 
-```bash
-mkdir -p .claude/skills
-ln -s "$(pwd)/skills/using-mem" .claude/skills/using-mem
-```
-
-### Install remotely (any project)
+Alternatively, install manually:
 
 ```bash
 mkdir -p .claude/skills/using-mem

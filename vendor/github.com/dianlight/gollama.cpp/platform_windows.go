@@ -47,6 +47,9 @@ func registerLibFunc(fptr interface{}, handle uintptr, fname string) {
 	// For now, this is a no-op to prevent build failures
 }
 
+// newCallbackFn is a no-op on Windows (not yet supported).
+func newCallbackFn(_ any) uintptr { return 0 }
+
 // isPlatformSupported returns whether the current platform is supported
 func isPlatformSupported() bool {
 	// For now, return false to indicate Windows support is not complete

@@ -691,6 +691,16 @@ func Backend_free() {
 	}
 }
 
+// Log_disable silences all llama.cpp log output by installing a no-op callback.
+func Log_disable() error {
+	if err := ensureLoaded(); err != nil {
+		return err
+	}
+	cb := newCallbackFn(func(level int32, text *byte, userData uintptr) {})
+	llamaLogSet(cb, 0)
+	return nil
+}
+
 // Model_default_params returns default model parameters
 func Model_default_params() LlamaModelParams {
 	if err := ensureLoaded(); err != nil {

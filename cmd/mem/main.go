@@ -21,7 +21,8 @@ func main() {
 		return
 	}
 
-	app := newApp()
+	debug := hasDebugFlag()
+	app := newApp(debug)
 	rootCmd := NewRootCmd(version, app)
 	if err := fang.Execute(ctx, rootCmd); err != nil {
 		os.Exit(1)
@@ -55,7 +56,16 @@ type app struct {
 	uc       *internal.UseCases
 }
 
-func newApp() *app {
+func hasDebugFlag() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "--debug" {
+			return true
+		}
+	}
+	return false
+}
+
+func newApp(debug bool) *app {
 	resolver := internal.NewScopeResolver()
 
 	repoFor := func(scope internal.Scope) (internal.MemoryRepository, error) {
@@ -93,7 +103,11 @@ func newApp() *app {
 				return
 			}
 
-			e, err := internal.NewLocalEmbedder(modelPath, 0)
+			var embedOpts []internal.EmbedderOption
+			if debug {
+				embedOpts = append(embedOpts, internal.WithDebug())
+			}
+			e, err := internal.NewLocalEmbedder(modelPath, 0, embedOpts...)
 			if err != nil {
 				slog.Warn("failed to initialize embedder", "error", err)
 				return

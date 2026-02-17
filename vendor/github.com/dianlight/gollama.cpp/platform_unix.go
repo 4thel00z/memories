@@ -21,6 +21,11 @@ func registerLibFunc(fptr interface{}, handle uintptr, fname string) {
 	purego.RegisterLibFunc(fptr, handle, fname)
 }
 
+// newCallbackFn creates a C-callable function pointer from a Go function.
+func newCallbackFn(fn any) uintptr {
+	return purego.NewCallback(fn)
+}
+
 // isPlatformSupported returns whether the current platform is supported
 func isPlatformSupported() bool {
 	return true

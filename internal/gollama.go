@@ -22,9 +22,18 @@ type LocalEmbedder struct {
 	modelPath string
 }
 
-func NewLocalEmbedder(modelPath string, dimension int) (*LocalEmbedder, error) {
+func NewLocalEmbedder(modelPath string, dimension int, opts ...EmbedderOption) (*LocalEmbedder, error) {
+	var cfg embedderConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	if err := gollama.Backend_init(); err != nil {
 		return nil, fmt.Errorf("init backend: %w", err)
+	}
+
+	if !cfg.debug {
+		_ = gollama.Log_disable()
 	}
 
 	var model gollama.LlamaModel
