@@ -2,7 +2,7 @@
 # Demo script for asciinema recording
 # Uses a temp dir to avoid polluting the real project
 
-set -e
+set +e
 
 DEMO_DIR=$(mktemp -d)
 cd "$DEMO_DIR"
@@ -51,7 +51,7 @@ type_cmd "mem search config"
 type_cmd "mem search purego"
 type_cmd "mem search 'test first'"
 
-# Semantic search
+# Semantic search (before index — shows fallback behavior)
 type_cmd "mem search -s 'how does the embedding model work' -n 3"
 type_cmd "mem search -s 'what causes crashes' -n 3"
 
