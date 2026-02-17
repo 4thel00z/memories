@@ -133,8 +133,18 @@ func newApp(debug bool) *app {
 		return idx, nil
 	}
 
+	setMemoryUC := internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, lazyEmbedder(), nil)
+	rebuildIndexUC := internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, lazyEmbedder())
+
+	hookStoreFn := func(ctx context.Context, key, content string) error {
+		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content})
+	}
+	var hookReindexFn internal.ReindexFunc = func(ctx context.Context) error {
+		return rebuildIndexUC.Execute(ctx, internal.RebuildIndexInput{NumTrees: 10})
+	}
+
 	uc := &internal.UseCases{
-		SetMemory:      internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, lazyEmbedder(), nil),
+		SetMemory:      setMemoryUC,
 		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
 		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, indexFor),
 		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
@@ -146,7 +156,7 @@ func newApp(debug bool) *app {
 		Revert:         internal.NewRevertUseCase(resolver, histFor),
 		KeywordSearch:  internal.NewKeywordSearchUseCase(resolver, repoFor),
 		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, indexFor, lazyEmbedder()),
-		RebuildIndex:   internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, lazyEmbedder()),
+		RebuildIndex:   rebuildIndexUC,
 		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, nil),
 		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, nil),
 		BranchCurrent:  internal.NewBranchCurrentUseCase(resolver, branchFor),
@@ -159,6 +169,9 @@ func newApp(debug bool) *app {
 		ProviderRemove: internal.NewProviderRemoveUseCase(resolver),
 		ProviderSetDef: internal.NewProviderSetDefaultUseCase(resolver),
 		ProviderTest:   internal.NewProviderTestUseCase(resolver),
+		InstallHook:    internal.NewInstallHookUseCase(resolver),
+		UninstallHook:  internal.NewUninstallHookUseCase(resolver),
+		RunHook:        internal.NewRunHookUseCase(resolver, nil, hookStoreFn, hookReindexFn),
 	}
 
 	return &app{

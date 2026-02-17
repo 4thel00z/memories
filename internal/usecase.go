@@ -181,6 +181,9 @@ type UseCases struct {
 	ProviderRemove *ProviderRemoveUseCase
 	ProviderSetDef *ProviderSetDefaultUseCase
 	ProviderTest   *ProviderTestUseCase
+	InstallHook    *InstallHookUseCase
+	UninstallHook  *UninstallHookUseCase
+	RunHook        *RunHookUseCase
 }
 
 // --- SetMemoryUseCase ---

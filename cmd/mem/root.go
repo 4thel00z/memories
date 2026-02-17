@@ -57,6 +57,9 @@ func addSubcommands(root *cobra.Command, a *app) {
 		NewEditCmd(uc.GetMemory, uc.SetMemory, uc.Commit),
 		NewWatchCmd(uc.Commit),
 		NewSkillCmd(),
+		NewInstallCmd(uc.InstallHook),
+		NewUninstallCmd(uc.UninstallHook),
+		NewHookCmd(uc.RunHook),
 	)
 }
 
