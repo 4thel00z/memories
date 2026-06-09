@@ -3,9 +3,14 @@ package internal
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+// configMu serializes in-process read-modify-write cycles on config files so
+// concurrent provider mutations within a single process don't lose updates.
+var configMu sync.Mutex
 
 // EmbedderOption configures the local embedder.
 type EmbedderOption func(*embedderConfig)
@@ -89,6 +94,9 @@ func LoadConfig(scope Scope) (*Config, error) {
 }
 
 func SaveConfig(scope Scope, cfg *Config) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+
 	path := scope.ConfigPath()
 
 	data, err := yaml.Marshal(cfg)
@@ -96,7 +104,15 @@ func SaveConfig(scope Scope, cfg *Config) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// Write atomically (temp + rename) with 0600: the config holds provider API
+	// keys and tokens, and a crash mid-write must not truncate it into unparseable
+	// YAML that breaks every subsequent load.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write config: %w", err)
 	}
 

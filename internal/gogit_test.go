@@ -31,6 +31,28 @@ func setupGitRepo(t *testing.T) (*GitRepository, Scope) {
 	return repo, scope
 }
 
+// TestGitRepositoryRejectsTraversalKey verifies the keyToPath containment guard
+// blocks a traversal key even when it bypasses NewKey (Key is a raw string type),
+// and that nothing is written outside the .mem directory.
+func TestGitRepositoryRejectsTraversalKey(t *testing.T) {
+	repo, scope := setupGitRepo(t)
+	ctx := context.Background()
+
+	escapeTarget := filepath.Join(filepath.Dir(scope.Path), "pwned")
+	mem := &Memory{Key: Key("../../pwned"), Content: []byte("owned")}
+
+	if err := repo.Save(ctx, mem); err == nil {
+		t.Fatal("expected Save with traversal key to error")
+	}
+	if _, err := os.Stat(escapeTarget); !os.IsNotExist(err) {
+		t.Fatalf("traversal key escaped the store: wrote %s", escapeTarget)
+	}
+
+	if _, err := repo.Get(ctx, Key("../../../etc/hosts")); err == nil {
+		t.Fatal("expected Get with traversal key to error")
+	}
+}
+
 func TestGitRepositorySaveAndGet(t *testing.T) {
 	repo, _ := setupGitRepo(t)
 	ctx := context.Background()

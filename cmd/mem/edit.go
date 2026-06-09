@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/4thel00z/memories/internal"
 	"github.com/spf13/cobra"
@@ -48,12 +47,7 @@ func makeEditRunner(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryU
 		}
 		tmpFile.Close()
 
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
-		}
-
-		c := exec.Command(editor, tmpFile.Name())
+		c := editorCommand(tmpFile.Name())
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr

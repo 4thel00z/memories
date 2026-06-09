@@ -51,7 +51,9 @@ func (d *Downloader) EnsureModel(ctx context.Context, url, filename string, onPr
 		return modelPath, nil
 	}
 
-	if err := os.MkdirAll(d.cacheDir, 0755); err != nil {
+	// 0700: the cache may hold gated/private model artifacts fetched with a
+	// bearer token, so it must not be world/group readable on shared machines.
+	if err := os.MkdirAll(d.cacheDir, 0700); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
 	}
 
@@ -83,7 +85,7 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	}
 
 	tmpFile := dest + ".tmp"
-	f, err := os.Create(tmpFile)
+	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -103,6 +105,15 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	if closeErr != nil {
 		os.Remove(tmpFile)
 		return fmt.Errorf("close file: %w", closeErr)
+	}
+
+	// Detect a truncated download: io.Copy can return early (e.g. the server
+	// closes the connection) without error. When the server advertised a length,
+	// require the written bytes to match it before trusting the file. Without
+	// this, a partial .gguf is renamed into place and cached forever.
+	if resp.ContentLength >= 0 && pw.Written != resp.ContentLength {
+		os.Remove(tmpFile)
+		return fmt.Errorf("incomplete download: got %d bytes, expected %d", pw.Written, resp.ContentLength)
 	}
 
 	if err := os.Rename(tmpFile, dest); err != nil {

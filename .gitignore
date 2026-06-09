@@ -1,5 +1,7 @@
 bin/
-mem
+# Anchor to the repo root: a bare "mem" also matched the cmd/mem/ source dir,
+# silently excluding its .go files from commits.
+/mem
 coverage.out
 coverage.html
 *.exe

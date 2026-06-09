@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sync"
 
 	"github.com/4thel00z/memories/internal"
 	"github.com/charmbracelet/fang"
@@ -78,52 +77,38 @@ func newApp(debug bool) *app {
 		return internal.NewGitRepository(scope)
 	}
 
-	// Lazy embedder + index initialization (only loaded on first use)
-	var (
-		embedderOnce sync.Once
-		embedder     internal.Embedder
-	)
+	// Lazy embedder + index initialization. The wrapper defers the expensive
+	// model download/load until an embedding method is actually called, so plain
+	// commands like `mem get`/`list`/`status` never pay that cost.
+	embedder := newLazyEmbedder(func() (internal.Embedder, error) {
+		cacheDir, err := internal.DefaultCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("get cache dir: %w", err)
+		}
 
-	lazyEmbedder := func() internal.Embedder {
-		embedderOnce.Do(func() {
-			cacheDir, err := internal.DefaultCacheDir()
-			if err != nil {
-				slog.Warn("failed to get cache dir for embedder", "error", err)
-				return
-			}
+		// Load config from resolved scope for model URL and token
+		modelURL, modelFilename, token := embeddingsFromConfig(resolver)
 
-			// Load config from resolved scope for model URL and token
-			modelURL, modelFilename, token := embeddingsFromConfig(resolver)
+		dl := internal.NewDownloader(cacheDir, token)
+		modelPath, err := dl.EnsureModel(context.Background(), modelURL, modelFilename, nil)
+		if err != nil {
+			return nil, fmt.Errorf("download embedding model: %w", err)
+		}
 
-			dl := internal.NewDownloader(cacheDir, token)
-			modelPath, err := dl.EnsureModel(context.Background(),
-				modelURL, modelFilename, nil)
-			if err != nil {
-				slog.Warn("failed to download embedding model", "error", err)
-				return
-			}
-
-			var embedOpts []internal.EmbedderOption
-			if debug {
-				embedOpts = append(embedOpts, internal.WithDebug())
-			}
-			e, err := internal.NewLocalEmbedder(modelPath, 0, embedOpts...)
-			if err != nil {
-				slog.Warn("failed to initialize embedder", "error", err)
-				return
-			}
-
-			embedder = e
-		})
-		return embedder
-	}
+		var embedOpts []internal.EmbedderOption
+		if debug {
+			embedOpts = append(embedOpts, internal.WithDebug())
+		}
+		return internal.NewLocalEmbedder(modelPath, 0, embedOpts...)
+	})
 
 	indexFor := func(scope internal.Scope) (internal.VectorIndex, error) {
-		e := lazyEmbedder()
-		if e == nil {
+		// Resolving the embedder triggers the model load; if it fails there is no
+		// usable index.
+		if _, err := embedder.resolve(); err != nil {
 			return nil, internal.ErrNoIndex
 		}
-		idx, err := internal.NewAnnoyIndex(scope.VectorPath(), e.Dimension())
+		idx, err := internal.NewAnnoyIndex(scope.VectorPath(), embedder.Dimension())
 		if err != nil {
 			return nil, err
 		}
@@ -133,14 +118,14 @@ func newApp(debug bool) *app {
 		return idx, nil
 	}
 
-	setMemoryUC := internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, lazyEmbedder(), nil)
-	rebuildIndexUC := internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, lazyEmbedder())
+	setMemoryUC := internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, embedder, nil)
+	rebuildIndexUC := internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, embedder)
 
-	hookStoreFn := func(ctx context.Context, key, content string) error {
-		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content})
-	}
-	var hookReindexFn internal.ReindexFunc = func(ctx context.Context) error {
-		return rebuildIndexUC.Execute(ctx, internal.RebuildIndexInput{NumTrees: 10})
+	// SetMemory keeps the vector index in sync incrementally, so the hook needs
+	// no separate reindex pass. scope is the store the hook config was resolved
+	// from, so the commit memory lands there and not wherever Resolve("") picks.
+	hookStoreFn := func(ctx context.Context, scope, key, content string) error {
+		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content, Scope: scope})
 	}
 
 	uc := &internal.UseCases{
@@ -148,14 +133,14 @@ func newApp(debug bool) *app {
 		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
 		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, indexFor),
 		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
-		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, indexFor, lazyEmbedder(), nil),
-		EditMemory:     internal.NewEditMemoryUseCase(resolver, repoFor, histFor, indexFor, lazyEmbedder(), nil),
+		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, indexFor, embedder, nil),
+		EditMemory:     internal.NewEditMemoryUseCase(resolver, repoFor, histFor, indexFor, embedder, nil),
 		Commit:         internal.NewCommitUseCase(resolver, histFor),
 		Log:            internal.NewLogUseCase(resolver, histFor),
 		Diff:           internal.NewDiffUseCase(resolver, histFor),
 		Revert:         internal.NewRevertUseCase(resolver, histFor),
 		KeywordSearch:  internal.NewKeywordSearchUseCase(resolver, repoFor),
-		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, indexFor, lazyEmbedder()),
+		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, indexFor, embedder),
 		RebuildIndex:   rebuildIndexUC,
 		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, nil),
 		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, nil),
@@ -171,7 +156,7 @@ func newApp(debug bool) *app {
 		ProviderTest:   internal.NewProviderTestUseCase(resolver),
 		InstallHook:    internal.NewInstallHookUseCase(resolver),
 		UninstallHook:  internal.NewUninstallHookUseCase(resolver),
-		RunHook:        internal.NewRunHookUseCase(resolver, nil, hookStoreFn, hookReindexFn),
+		RunHook:        internal.NewRunHookUseCase(resolver, nil, hookStoreFn),
 	}
 
 	return &app{

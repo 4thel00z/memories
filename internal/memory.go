@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"path"
 	"regexp"
 	"time"
 )
@@ -23,6 +24,13 @@ func NewKey(s string) (Key, error) {
 		return "", ErrInvalidKey
 	}
 	if !keyPattern.MatchString(s) {
+		return "", ErrInvalidKey
+	}
+	// Reject path-traversal: the key must already be a clean relative slash path.
+	// path.Clean collapses "..", ".", "//" and trailing slashes, so any key that
+	// changes under Clean (e.g. "a/../../../etc/passwd") is rejected before it can
+	// escape the .mem directory when joined.
+	if path.Clean(s) != s {
 		return "", ErrInvalidKey
 	}
 	return Key(s), nil

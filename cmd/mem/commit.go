@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/4thel00z/memories/internal"
@@ -52,11 +51,6 @@ func makeCommitRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []s
 }
 
 func getMessageFromEditor() (string, error) {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-
 	tmpFile, err := os.CreateTemp("", "mem-commit-*.txt")
 	if err != nil {
 		return "", err
@@ -68,7 +62,7 @@ func getMessageFromEditor() (string, error) {
 	}
 	tmpFile.Close()
 
-	c := exec.Command(editor, tmpFile.Name())
+	c := editorCommand(tmpFile.Name())
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

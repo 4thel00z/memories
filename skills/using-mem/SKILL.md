@@ -137,6 +137,12 @@ mem get hooks/commits/<hash>
 | Uninstall hook | `mem uninstall` |
 | List hook memories | `mem list hooks/commits/` |
 
+> **Deletion guardrail:** Only run `mem del` when the user explicitly asks you
+> to remove a memory. Never auto-delete entries you didn't create, and never
+> "clean up" memories you judge outdated on your own — supersede them by
+> overwriting with `mem set` instead. Git history preserves prior values, so
+> there is no need to delete to correct a memory.
+
 ## Red Flags — STOP and Check mem
 
 These thoughts mean you're skipping the recall phase:
