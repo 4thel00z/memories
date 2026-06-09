@@ -12,7 +12,9 @@ permissions:
 jobs:
   build-test:
     name: build & test
-    runs-on: ubuntu-latest
+    # Runs on macOS: the project's vector-index dependency (goannoy) faults on
+    # linux/amd64, and macOS is the supported development/test platform.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
