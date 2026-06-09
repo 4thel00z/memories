@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -102,6 +103,62 @@ func TestProviderAddAndList(t *testing.T) {
 	}
 }
 
+func TestProviderListShowsMaskedDetails(t *testing.T) {
+	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
+
+	addCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
+	addCmd.SetArgs([]string{
+		"add", "openrouter",
+		"--api-key", "sk-secretkey1234567890",
+		"--base-url", "https://openrouter.ai/api/v1",
+		"--model", "anthropic/claude-sonnet-4",
+	})
+	var addOut bytes.Buffer
+	addCmd.SetOut(&addOut)
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	listCmd := NewProviderCmd(listUC, addUC, removeUC, setDefUC, testUC)
+	listCmd.SetArgs([]string{"list"})
+	var listOut bytes.Buffer
+	listCmd.SetOut(&listOut)
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	got := listOut.String()
+	if !strings.Contains(got, "https://openrouter.ai/api/v1") {
+		t.Errorf("expected base_url in list output, got %q", got)
+	}
+	if !strings.Contains(got, "anthropic/claude-sonnet-4") {
+		t.Errorf("expected model in list output, got %q", got)
+	}
+	if strings.Contains(got, "sk-secretkey1234567890") {
+		t.Errorf("api key must be masked, but full key leaked in %q", got)
+	}
+	if !strings.Contains(got, maskSecret("sk-secretkey1234567890")) {
+		t.Errorf("expected masked api key in list output, got %q", got)
+	}
+}
+
+func TestMaskSecret(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "(not set)"},
+		{"short", "****"},
+		{"12345678", "****"},
+		{"sk-secretkey1234567890", "sk-s...7890"},
+	}
+	for _, c := range cases {
+		if got := maskSecret(c.in); got != c.want {
+			t.Errorf("maskSecret(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestProviderRemove(t *testing.T) {
 	listUC, addUC, removeUC, setDefUC, testUC := setupProviderTest(t)
 
@@ -125,6 +182,54 @@ func TestProviderRemove(t *testing.T) {
 
 	if !strings.Contains(rmOut.String(), "Removed provider todelete") {
 		t.Errorf("unexpected remove output: %q", rmOut.String())
+	}
+}
+
+func TestProviderPrompterFillsMissingFields(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader("https://api.example.com/v1\ngpt-4o\n"))
+	var out bytes.Buffer
+	p := providerPrompter{
+		in:         in,
+		out:        &out,
+		readSecret: func(string) (string, error) { return "sk-from-prompt", nil },
+	}
+
+	got, err := p.fill(internal.ProviderConfig{})
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+	if got.BaseURL != "https://api.example.com/v1" {
+		t.Errorf("base url: got %q", got.BaseURL)
+	}
+	if got.Model != "gpt-4o" {
+		t.Errorf("model: got %q", got.Model)
+	}
+	if got.APIKey != "sk-from-prompt" {
+		t.Errorf("api key: got %q", got.APIKey)
+	}
+}
+
+func TestProviderPrompterKeepsProvidedFields(t *testing.T) {
+	p := providerPrompter{
+		in:  bufio.NewReader(strings.NewReader("")),
+		out: &bytes.Buffer{},
+		readSecret: func(string) (string, error) {
+			t.Fatal("should not prompt for api key when already provided")
+			return "", nil
+		},
+	}
+
+	in := internal.ProviderConfig{
+		APIKey:  "sk-flag",
+		BaseURL: "https://flag.example.com",
+		Model:   "flag-model",
+	}
+	got, err := p.fill(in)
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+	if got != in {
+		t.Errorf("expected config unchanged, got %+v", got)
 	}
 }
 

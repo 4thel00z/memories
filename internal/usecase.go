@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 )
@@ -1273,22 +1274,35 @@ type ProviderListUseCase struct {
 	resolver *ScopeResolver
 }
 
+// ProviderListItem is a single configured provider with its connection
+// details and whether it is the current default.
+type ProviderListItem struct {
+	Name      string
+	Config    ProviderConfig
+	IsDefault bool
+}
+
 func NewProviderListUseCase(resolver *ScopeResolver) *ProviderListUseCase {
 	return &ProviderListUseCase{resolver: resolver}
 }
 
-func (uc *ProviderListUseCase) Execute(input ProviderInput) ([]string, error) {
+func (uc *ProviderListUseCase) Execute(input ProviderInput) ([]ProviderListItem, error) {
 	scope := uc.resolver.Resolve(input.Scope)
 	cfg, err := LoadConfig(scope)
 	if err != nil {
 		return nil, err
 	}
 
-	names := make([]string, 0, len(cfg.Providers))
-	for name := range cfg.Providers {
-		names = append(names, name)
+	items := make([]ProviderListItem, 0, len(cfg.Providers))
+	for name, providerCfg := range cfg.Providers {
+		items = append(items, ProviderListItem{
+			Name:      name,
+			Config:    providerCfg,
+			IsDefault: name == cfg.DefaultProvider,
+		})
 	}
-	return names, nil
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items, nil
 }
 
 // --- ProviderAddUseCase ---
