@@ -30,13 +30,10 @@ func newIndexRebuildCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command 
 			scopeHint, _ := cmd.Flags().GetString("scope")
 			trees, _ := cmd.Flags().GetInt("trees")
 
-			if err := rebuildUC.Execute(cmd.Context(), internal.RebuildIndexInput{
-				Scope: scopeHint, NumTrees: trees,
-			}); err != nil {
+			in := internal.RebuildIndexInput{Scope: scopeHint, NumTrees: trees}
+			if err := runRebuild(cmd.Context(), rebuildUC, in, cmd.OutOrStdout()); err != nil {
 				return fmt.Errorf("rebuild index: %w", err)
 			}
-
-			fmt.Fprintln(cmd.OutOrStdout(), "Index rebuilt successfully.")
 			return nil
 		},
 	}

@@ -2,7 +2,6 @@ package internal
 
 import (
 	"os"
-	"os/exec"
 	"runtime"
 )
 
@@ -29,11 +28,9 @@ func isMPS() bool {
 }
 
 func isCUDA() bool {
-	if _, err := os.Stat("/dev/nvidia0"); err == nil {
-		return true
-	}
-	if _, err := exec.LookPath("nvidia-smi"); err == nil {
-		return true
-	}
-	return false
+	// Probe for an actual device node. A mere `nvidia-smi` on PATH does not mean
+	// a usable GPU is present (e.g. driver tools installed on a CPU-only host),
+	// and falsely enabling GPU layers leads to a failed/fallback model load.
+	_, err := os.Stat("/dev/nvidia0")
+	return err == nil
 }

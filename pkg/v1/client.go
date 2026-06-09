@@ -14,15 +14,24 @@ type Client struct {
 }
 
 // New creates a new Client with the given options.
+//
+// If no scope is configured via WithScope and there is no project .mem store in
+// the working directory tree, New returns an error rather than silently falling
+// back to the user's global ~/.mem store. Pass WithScope("global") to opt into
+// the global store explicitly.
 func New(opts ...Option) (*Client, error) {
-	cfg := &clientConfig{
-		dimension: 256,
-	}
+	cfg := &clientConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
 	resolver := internal.NewScopeResolver()
+
+	if cfg.scope == "" {
+		if _, ok := resolver.Project(); !ok {
+			return nil, fmt.Errorf("no scope configured and no project .mem found; pass WithScope(\"global\") to use the global store")
+		}
+	}
 
 	repoFor := func(scope internal.Scope) (internal.MemoryRepository, error) {
 		return internal.NewGitRepository(scope)
@@ -57,10 +66,14 @@ func (c *Client) Set(ctx context.Context, key string, value []byte) error {
 		return fmt.Errorf("set: %w", err)
 	}
 
-	_, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
+	if _, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
 		Message: fmt.Sprintf("set: %s", key), Scope: c.scope,
-	})
-	return err
+	}); err != nil {
+		// The write is already staged on disk; surface that the commit failed so
+		// the caller knows the store has an uncommitted change to reconcile.
+		return fmt.Errorf("set: wrote %q but commit failed (change left uncommitted): %w", key, err)
+	}
+	return nil
 }
 
 // Get retrieves a memory by key.
@@ -82,10 +95,12 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("delete: %w", err)
 	}
 
-	_, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
+	if _, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
 		Message: fmt.Sprintf("del: %s", key), Scope: c.scope,
-	})
-	return err
+	}); err != nil {
+		return fmt.Errorf("delete: removed %q but commit failed (change left uncommitted): %w", key, err)
+	}
+	return nil
 }
 
 // List returns all memories matching the prefix.

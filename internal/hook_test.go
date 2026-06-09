@@ -109,7 +109,7 @@ func TestInstallHookUseCase_ExistingHook_Force(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	bakContent, err := os.ReadFile(hookPath + ".bak")
+	bakContent, err := os.ReadFile(hookPath + ".mem.bak")
 	require.NoError(t, err)
 	assert.Contains(t, string(bakContent), "echo existing")
 
@@ -148,7 +148,7 @@ func TestUninstallHookUseCase_RestoresBackup(t *testing.T) {
 
 	hookPath := filepath.Join(dir, ".git", "hooks", "post-commit")
 	require.NoError(t, os.WriteFile(hookPath, []byte(HookScript("post-commit")), 0755))
-	require.NoError(t, os.WriteFile(hookPath+".bak", []byte("#!/bin/sh\necho original"), 0755))
+	require.NoError(t, os.WriteFile(hookPath+".mem.bak", []byte("#!/bin/sh\necho original"), 0755))
 
 	require.NoError(t, SaveConfig(scope, DefaultConfig()))
 
@@ -160,7 +160,7 @@ func TestUninstallHookUseCase_RestoresBackup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "echo original")
 
-	_, err = os.Stat(hookPath + ".bak")
+	_, err = os.Stat(hookPath + ".mem.bak")
 	assert.True(t, os.IsNotExist(err))
 }
 
@@ -318,7 +318,7 @@ func TestRunHookUseCase_Extract(t *testing.T) {
 		return nil
 	}
 
-	uc := NewRunHookUseCase(resolver, nil, storeFn, nil)
+	uc := NewRunHookUseCase(resolver, nil, storeFn)
 	err := uc.Execute(context.Background(), RunHookInput{
 		HookType: "post-commit",
 		CommitContext: CommitContext{
@@ -339,7 +339,7 @@ func TestRunHookUseCase_Disabled(t *testing.T) {
 	cfg.Hooks.PostCommit = PostCommitHookConfig{Enabled: false}
 	require.NoError(t, SaveConfig(scope, cfg))
 
-	uc := NewRunHookUseCase(resolver, nil, nil, nil)
+	uc := NewRunHookUseCase(resolver, nil, nil)
 	err := uc.Execute(context.Background(), RunHookInput{
 		HookType:      "post-commit",
 		CommitContext: CommitContext{Hash: "abc1234", Diff: "something"},

@@ -105,9 +105,10 @@ func (p *FantasyProvider) GenerateObject(ctx context.Context, prompt string, tar
 	}
 
 	objVal := reflect.ValueOf(resp.Object)
-	if objVal.IsValid() && objVal.Type().AssignableTo(targetVal.Elem().Type()) {
-		targetVal.Elem().Set(objVal)
+	if !objVal.IsValid() || !objVal.Type().AssignableTo(targetVal.Elem().Type()) {
+		return fmt.Errorf("model returned incompatible object type %T", resp.Object)
 	}
+	targetVal.Elem().Set(objVal)
 
 	return nil
 }
@@ -123,14 +124,25 @@ func (p *FantasyProvider) Stream(ctx context.Context, prompt string) (<-chan str
 		_, err := agent.Stream(ctx, fantasy.AgentStreamCall{
 			Prompt: prompt,
 			OnTextDelta: func(_, text string) error {
-				if text != "" {
-					ch <- text
+				if text == "" {
+					return nil
 				}
-				return nil
+				// Honor cancellation: if the consumer stops reading, the buffered
+				// channel fills and this send would block forever, leaking the
+				// goroutine. Selecting on ctx.Done lets it unwind cleanly.
+				select {
+				case ch <- text:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			},
 		})
 		if err != nil {
-			ch <- fmt.Sprintf("\n[error: %v]", err)
+			select {
+			case ch <- fmt.Sprintf("\n[error: %v]", err):
+			case <-ctx.Done():
+			}
 		}
 	}()
 

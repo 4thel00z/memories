@@ -13,6 +13,39 @@ import (
 
 var _ Embedder = (*LocalEmbedder)(nil)
 
+// The llama.cpp backend is a process-global singleton: Backend_init/Backend_free
+// affect the whole process. Refcount acquisitions so that closing one embedder
+// can't free the backend out from under another live embedder (a use-after-free
+// in native code).
+var (
+	backendMu   sync.Mutex
+	backendRefs int
+)
+
+func backendAcquire() error {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+	if backendRefs == 0 {
+		if err := gollama.Backend_init(); err != nil {
+			return err
+		}
+	}
+	backendRefs++
+	return nil
+}
+
+func backendRelease() {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+	if backendRefs == 0 {
+		return
+	}
+	backendRefs--
+	if backendRefs == 0 {
+		gollama.Backend_free()
+	}
+}
+
 type LocalEmbedder struct {
 	mu        sync.Mutex
 	model     gollama.LlamaModel
@@ -28,7 +61,7 @@ func NewLocalEmbedder(modelPath string, dimension int, opts ...EmbedderOption) (
 		o(&cfg)
 	}
 
-	if err := gollama.Backend_init(); err != nil {
+	if err := backendAcquire(); err != nil {
 		return nil, fmt.Errorf("init backend: %w", err)
 	}
 
@@ -50,7 +83,7 @@ func NewLocalEmbedder(modelPath string, dimension int, opts ...EmbedderOption) (
 		if model != 0 {
 			gollama.Model_free(model)
 		}
-		gollama.Backend_free()
+		backendRelease()
 	}()
 
 	device := DetectHardware()
@@ -108,7 +141,9 @@ func (e *LocalEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	}
 
 	if len(tokens) == 0 {
-		return make([]float32, e.dimension), nil
+		// An all-zero vector has undefined direction under angular distance and
+		// would poison search; reject empty input rather than emit one.
+		return nil, fmt.Errorf("cannot embed empty text")
 	}
 
 	gollama.Memory_clear(e.ctx, false)
@@ -144,7 +179,19 @@ func (e *LocalEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	}
 
 	embeddings := ptrToSlice(embPtr, e.dimension)
-	normalized := l2Normalize(embeddings)
+
+	// Guard against a corrupt/mismatched model emitting NaN/Inf, which would
+	// propagate through normalization into the index and break distance math.
+	for _, v := range embeddings {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return nil, fmt.Errorf("model produced non-finite embedding value")
+		}
+	}
+
+	normalized, err := l2Normalize(embeddings)
+	if err != nil {
+		return nil, err
+	}
 
 	return normalized, nil
 }
@@ -175,9 +222,20 @@ func (e *LocalEmbedder) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	gollama.Free(e.ctx)
-	gollama.Model_free(e.model)
-	gollama.Backend_free()
+	// Idempotent: guard against double-close freeing native handles or
+	// over-releasing the shared backend refcount.
+	if e.ctx == 0 && e.model == 0 {
+		return nil
+	}
+	if e.ctx != 0 {
+		gollama.Free(e.ctx)
+		e.ctx = 0
+	}
+	if e.model != 0 {
+		gollama.Model_free(e.model)
+		e.model = 0
+	}
+	backendRelease()
 
 	return nil
 }
@@ -194,15 +252,15 @@ func ptrToSlice(ptr *float32, size int) []float32 {
 	return dst
 }
 
-func l2Normalize(vec []float32) []float32 {
+func l2Normalize(vec []float32) ([]float32, error) {
 	var sum float64
 	for _, v := range vec {
 		sum += float64(v) * float64(v)
 	}
 
 	norm := math.Sqrt(sum)
-	if norm == 0 {
-		return vec
+	if norm == 0 || math.IsNaN(norm) || math.IsInf(norm, 0) {
+		return nil, fmt.Errorf("cannot normalize zero or non-finite vector")
 	}
 
 	result := make([]float32, len(vec))
@@ -210,5 +268,5 @@ func l2Normalize(vec []float32) []float32 {
 		result[i] = float32(float64(v) / norm)
 	}
 
-	return result
+	return result, nil
 }

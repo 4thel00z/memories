@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -94,6 +95,9 @@ type SearchResultOutput struct {
 type RebuildIndexInput struct {
 	Scope    string
 	NumTrees int
+	// OnProgress, if set, is called once after the memory list is known
+	// (done=0, total=N) and after each memory is embedded (done=i+1, total=N).
+	OnProgress func(done, total int)
 }
 
 type SummarizeInput struct {
@@ -222,7 +226,10 @@ func (uc *SetMemoryUseCase) Execute(ctx context.Context, input SetMemoryInput) e
 
 	if uc.ignore != nil {
 		matcher, err := uc.ignore(scope)
-		if err == nil && matcher.MatchKey(key) {
+		if err != nil {
+			return fmt.Errorf("check .memignore: %w", err)
+		}
+		if matcher.MatchKey(key) {
 			return fmt.Errorf("key %q is blocked by .memignore", input.Key)
 		}
 	}
@@ -260,9 +267,44 @@ func (uc *SetMemoryUseCase) Execute(ctx context.Context, input SetMemoryInput) e
 	}
 
 	emb := NewEmbedding(vec, "local")
-	_ = index.Add(ctx, key, emb)
+	persistIndexUpdate(ctx, index, key, emb)
 
 	return nil
+}
+
+// persistIndexUpdate adds an embedding to the index and then rebuilds and saves
+// it, so incremental writes are durable. Without the Build+Save, an Add only
+// mutates an in-memory index that is discarded when the use case returns,
+// silently desyncing the vector index from the store. Failures are logged
+// rather than fatal: the memory itself is already saved.
+func persistIndexUpdate(ctx context.Context, index VectorIndex, key Key, emb Embedding) {
+	if err := index.Add(ctx, key, emb); err != nil {
+		slog.Warn("index add failed", "key", key.String(), "error", err)
+		return
+	}
+	if err := index.Build(ctx, DefaultIndexTrees); err != nil {
+		slog.Warn("index build failed", "error", err)
+		return
+	}
+	if err := index.Save(ctx); err != nil {
+		slog.Warn("index save failed", "error", err)
+	}
+}
+
+// persistIndexRemoval removes a key from the index and rebuilds and saves it so
+// the deletion is durable.
+func persistIndexRemoval(ctx context.Context, index VectorIndex, key Key) {
+	if err := index.Remove(ctx, key); err != nil {
+		slog.Warn("index remove failed", "key", key.String(), "error", err)
+		return
+	}
+	if err := index.Build(ctx, DefaultIndexTrees); err != nil {
+		slog.Warn("index build failed", "error", err)
+		return
+	}
+	if err := index.Save(ctx); err != nil {
+		slog.Warn("index save failed", "error", err)
+	}
 }
 
 // --- GetMemoryUseCase ---
@@ -353,7 +395,7 @@ func (uc *DeleteMemoryUseCase) Execute(ctx context.Context, input DeleteMemoryIn
 
 	if uc.indexFor != nil {
 		if index, err := uc.indexFor(scope); err == nil {
-			_ = index.Remove(ctx, key)
+			persistIndexRemoval(ctx, index, key)
 		}
 	}
 
@@ -444,7 +486,10 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 
 	if uc.ignore != nil {
 		matcher, err := uc.ignore(scope)
-		if err == nil && matcher.MatchKey(key) {
+		if err != nil {
+			return nil, fmt.Errorf("check .memignore: %w", err)
+		}
+		if matcher.MatchKey(key) {
 			return nil, fmt.Errorf("key %q is blocked by .memignore", input.Key)
 		}
 	}
@@ -457,7 +502,12 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 	existing, _ := repo.Get(ctx, key)
 	var newContent []byte
 	if existing != nil {
-		newContent = append(existing.Content, []byte("\n"+input.Content)...)
+		// Copy rather than append onto existing.Content's backing array, so we
+		// never mutate a slice the repository may share or cache.
+		newContent = make([]byte, 0, len(existing.Content)+1+len(input.Content))
+		newContent = append(newContent, existing.Content...)
+		newContent = append(newContent, '\n')
+		newContent = append(newContent, input.Content...)
 	} else {
 		newContent = []byte(input.Content)
 	}
@@ -492,7 +542,7 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 		if index, err := uc.indexFor(scope); err == nil {
 			if vec, err := uc.embedder.Embed(ctx, string(newContent)); err == nil {
 				emb := NewEmbedding(vec, "local")
-				_ = index.Add(ctx, key, emb)
+				persistIndexUpdate(ctx, index, key, emb)
 			} else {
 				slog.Warn("skipping index update: embedding failed", "error", err)
 			}
@@ -547,7 +597,10 @@ func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput)
 
 	if uc.ignore != nil {
 		matcher, err := uc.ignore(scope)
-		if err == nil && matcher.MatchKey(key) {
+		if err != nil {
+			return nil, fmt.Errorf("check .memignore: %w", err)
+		}
+		if matcher.MatchKey(key) {
 			return nil, fmt.Errorf("key %q is blocked by .memignore", input.Key)
 		}
 	}
@@ -587,7 +640,7 @@ func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput)
 		if index, err := uc.indexFor(scope); err == nil {
 			if vec, err := uc.embedder.Embed(ctx, input.Content); err == nil {
 				emb := NewEmbedding(vec, "local")
-				_ = index.Add(ctx, key, emb)
+				persistIndexUpdate(ctx, index, key, emb)
 			} else {
 				slog.Warn("skipping index update: embedding failed", "error", err)
 			}
@@ -890,13 +943,35 @@ func (uc *RebuildIndexUseCase) Execute(ctx context.Context, input RebuildIndexIn
 		return fmt.Errorf("list memories: %w", err)
 	}
 
-	for _, mem := range memories {
+	total := len(memories)
+	if input.OnProgress != nil {
+		input.OnProgress(0, total)
+	}
+
+	var added, failed int
+	for i, mem := range memories {
 		vec, err := uc.embedder.Embed(ctx, string(mem.Content))
 		if err != nil {
-			continue
+			slog.Warn("rebuild: embed failed", "key", mem.Key.String(), "error", err)
+			failed++
+		} else {
+			emb := NewEmbedding(vec, "local")
+			if err := index.Add(ctx, mem.Key, emb); err != nil {
+				slog.Warn("rebuild: index add failed", "key", mem.Key.String(), "error", err)
+				failed++
+			} else {
+				added++
+			}
 		}
-		emb := NewEmbedding(vec, "local")
-		_ = index.Add(ctx, mem.Key, emb)
+		if input.OnProgress != nil {
+			input.OnProgress(i+1, total)
+		}
+	}
+
+	// Don't report success for a rebuild that indexed nothing while there were
+	// memories to index — that silently leaves search broken.
+	if added == 0 && len(memories) > 0 {
+		return fmt.Errorf("rebuild indexed 0 of %d memories (%d failed)", len(memories), failed)
 	}
 
 	if err := index.Build(ctx, input.NumTrees); err != nil {
@@ -1003,6 +1078,9 @@ func (uc *AutoTagUseCase) Execute(ctx context.Context, input AutoTagInput) (*Aut
 
 	mem, err := repo.Get(ctx, key)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get memory: %w", err)
 	}
 

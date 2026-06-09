@@ -121,7 +121,10 @@ func InitRepository(scope Scope) error {
 // MemoryRepository implementation
 
 func (r *GitRepository) Get(ctx context.Context, key Key) (*Memory, error) {
-	path := r.keyToPath(key)
+	path, err := r.keyToPath(key)
+	if err != nil {
+		return nil, err
+	}
 
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -145,14 +148,30 @@ func (r *GitRepository) Get(ctx context.Context, key Key) (*Memory, error) {
 }
 
 func (r *GitRepository) Save(ctx context.Context, mem *Memory) error {
-	path := r.keyToPath(mem.Key)
+	path, err := r.keyToPath(mem.Key)
+	if err != nil {
+		return err
+	}
+
+	lock, err := r.lock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, mem.Content, 0644); err != nil {
+	// Write atomically: write to a temp file in the same directory, then rename
+	// over the target so a crash or concurrent reader never sees a partial file.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, mem.Content, 0644); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write file: %w", err)
 	}
 
@@ -169,7 +188,16 @@ func (r *GitRepository) Save(ctx context.Context, mem *Memory) error {
 }
 
 func (r *GitRepository) Delete(ctx context.Context, key Key) error {
-	path := r.keyToPath(key)
+	path, err := r.keyToPath(key)
+	if err != nil {
+		return err
+	}
+
+	lock, err := r.lock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return ErrNotFound
@@ -190,6 +218,10 @@ func (r *GitRepository) Delete(ctx context.Context, key Key) error {
 func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, error) {
 	var memories []*Memory
 
+	// Compute first-commit times for every tracked path in a single history
+	// walk, instead of one full git-log traversal per file.
+	createdTimes := r.firstCommitTimes()
+
 	err := filepath.Walk(r.memPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -209,7 +241,9 @@ func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, err
 			return err
 		}
 
-		if prefix != "" && !strings.HasPrefix(relPath, prefix) {
+		// Match prefix on path-component boundaries so "ctx" matches "ctx/foo"
+		// but not "ctxfoo" or "ctx-other".
+		if prefix != "" && relPath != prefix && !strings.HasPrefix(relPath, prefix+"/") {
 			return nil
 		}
 
@@ -223,10 +257,15 @@ func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, err
 			return err
 		}
 
+		created := info.ModTime()
+		if t, ok := createdTimes[relPath]; ok {
+			created = t
+		}
+
 		memories = append(memories, &Memory{
 			Key:       key,
 			Content:   content,
-			CreatedAt: r.getFirstCommitTime(key, info.ModTime()),
+			CreatedAt: created,
 			UpdatedAt: info.ModTime(),
 		})
 
@@ -241,8 +280,11 @@ func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, err
 }
 
 func (r *GitRepository) Exists(ctx context.Context, key Key) (bool, error) {
-	path := r.keyToPath(key)
-	_, err := os.Stat(path)
+	path, err := r.keyToPath(key)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(path)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
@@ -343,6 +385,12 @@ func (r *GitRepository) DeleteBranch(ctx context.Context, name string) error {
 // HistoryRepository implementation
 
 func (r *GitRepository) Commit(ctx context.Context, message string) (*Commit, error) {
+	lock, err := r.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
 	hash, err := r.worktree.Commit(message, &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  DefaultAuthor,
@@ -423,42 +471,41 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 	dmp := diffmatchpatch.New()
 
 	for path, s := range status {
+		if s.Staging == git.Unmodified && s.Worktree == git.Unmodified {
+			continue
+		}
+
+		// Compare HEAD content against the current on-disk content directly. This
+		// covers both staged and unstaged changes (added/modified/deleted) without
+		// depending on which side of the index the change landed on.
+		var oldContent string
+		if f, headErr := headTree.File(path); headErr == nil {
+			if c, err := f.Contents(); err == nil {
+				oldContent = c
+			}
+		}
+
+		var newContent string
+		hasNew := false
+		if data, readErr := os.ReadFile(filepath.Join(r.memPath, path)); readErr == nil {
+			newContent = string(data)
+			hasNew = true
+		}
+
+		if oldContent == newContent {
+			continue
+		}
+
 		switch {
-		case s.Staging == git.Added:
-			content, readErr := os.ReadFile(filepath.Join(r.memPath, path))
-			if readErr != nil {
-				continue
-			}
+		case oldContent == "" && hasNew:
 			fmt.Fprintf(&buf, "--- /dev/null\n+++ b/%s\n", path)
-			writeUnifiedHunks(&buf, "", string(content), dmp)
-
-		case s.Staging == git.Modified:
-			f, headErr := headTree.File(path)
-			if headErr != nil {
-				continue
-			}
-			oldContent, headErr := f.Contents()
-			if headErr != nil {
-				continue
-			}
-			newContent, readErr := os.ReadFile(filepath.Join(r.memPath, path))
-			if readErr != nil {
-				continue
-			}
-			fmt.Fprintf(&buf, "--- a/%s\n+++ b/%s\n", path, path)
-			writeUnifiedHunks(&buf, oldContent, string(newContent), dmp)
-
-		case s.Staging == git.Deleted:
-			f, headErr := headTree.File(path)
-			if headErr != nil {
-				continue
-			}
-			oldContent, headErr := f.Contents()
-			if headErr != nil {
-				continue
-			}
+			writeUnifiedHunks(&buf, "", newContent, dmp)
+		case !hasNew && oldContent != "":
 			fmt.Fprintf(&buf, "--- a/%s\n+++ /dev/null\n", path)
 			writeUnifiedHunks(&buf, oldContent, "", dmp)
+		default:
+			fmt.Fprintf(&buf, "--- a/%s\n+++ b/%s\n", path, path)
+			writeUnifiedHunks(&buf, oldContent, newContent, dmp)
 		}
 	}
 
@@ -567,6 +614,17 @@ func (r *GitRepository) Revert(ctx context.Context, ref string) error {
 		return fmt.Errorf("resolve ref: %w", err)
 	}
 
+	// Reset is a hard reset that discards uncommitted work. Refuse when the
+	// worktree is dirty so an unsaved/uncommitted memory edit is never silently
+	// destroyed; the caller must commit or stash first.
+	status, err := r.worktree.Status()
+	if err != nil {
+		return fmt.Errorf("get status: %w", err)
+	}
+	if !status.IsClean() {
+		return fmt.Errorf("worktree has uncommitted changes; commit or discard them before revert")
+	}
+
 	if err := r.worktree.Reset(&git.ResetOptions{
 		Commit: *resolved,
 		Mode:   git.HardReset,
@@ -578,6 +636,41 @@ func (r *GitRepository) Revert(ctx context.Context, ref string) error {
 }
 
 // helpers
+
+// lock acquires the per-repository write lock. Mutating operations (Save,
+// Delete, Commit) hold it so concurrent `mem` processes cannot corrupt the
+// go-git index, which lacks git's native index.lock.
+func (r *GitRepository) lock() (*fileLock, error) {
+	return acquireLock(filepath.Join(r.memPath, ".git"), 10*time.Second)
+}
+
+// firstCommitTimes returns the earliest authoring time each tracked path was
+// seen, computed in a single pass over the commit history. This replaces an
+// O(N·history) per-file log walk in List with one O(history) traversal.
+func (r *GitRepository) firstCommitTimes() map[string]time.Time {
+	times := make(map[string]time.Time)
+
+	iter, err := r.repo.Log(&git.LogOptions{})
+	if err != nil {
+		return times
+	}
+	defer iter.Close()
+
+	_ = iter.ForEach(func(c *object.Commit) error {
+		stats, err := c.Stats()
+		if err != nil {
+			return nil
+		}
+		for _, s := range stats {
+			if t, ok := times[s.Name]; !ok || c.Author.When.Before(t) {
+				times[s.Name] = c.Author.When
+			}
+		}
+		return nil
+	})
+
+	return times
+}
 
 func (r *GitRepository) getFirstCommitTime(key Key, fallback time.Time) time.Time {
 	relPath := key.String()
@@ -604,8 +697,17 @@ func (r *GitRepository) getFirstCommitTime(key Key, fallback time.Time) time.Tim
 	return earliest
 }
 
-func (r *GitRepository) keyToPath(key Key) string {
-	return filepath.Join(r.memPath, key.String())
+// keyToPath resolves a key to its on-disk path and verifies the result stays
+// within the .mem directory. NewKey already rejects traversal segments; this is
+// a defense-in-depth containment check so a crafted key can never escape the
+// store even if it reaches this layer by another path.
+func (r *GitRepository) keyToPath(key Key) (string, error) {
+	path := filepath.Join(r.memPath, key.String())
+	rel, err := filepath.Rel(r.memPath, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w: escapes store root", ErrInvalidKey)
+	}
+	return path, nil
 }
 
 func (r *GitRepository) toCommit(c *object.Commit) *Commit {

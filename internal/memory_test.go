@@ -43,6 +43,13 @@ func TestNewKeyInvalid(t *testing.T) {
 		"special!char",
 		"special@char",
 		"special#char",
+		// Path traversal: must be rejected so a key can't escape the .mem dir.
+		"a/../../../etc/passwd",
+		"a/../b",
+		"a/./b",
+		"a//b",
+		"foo/..",
+		"foo/.",
 	}
 
 	for _, s := range invalid {

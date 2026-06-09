@@ -15,6 +15,10 @@ import (
 const (
 	IndexFilename   = "index.ann"
 	MappingFilename = "mapping.json"
+
+	// DefaultIndexTrees is the number of trees used when an incremental write
+	// rebuilds and persists the index.
+	DefaultIndexTrees = 10
 )
 
 var _ VectorIndex = (*AnnoyIndex)(nil)
@@ -38,7 +42,7 @@ type indexMapping struct {
 }
 
 func NewAnnoyIndex(basePath string, dimension int) (*AnnoyIndex, error) {
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0700); err != nil {
 		return nil, fmt.Errorf("create vectors directory: %w", err)
 	}
 
@@ -154,11 +158,18 @@ func (a *AnnoyIndex) Search(ctx context.Context, query Embedding, k int) ([]Sear
 			continue
 		}
 
-		// Convert angular distance to similarity score (0-1, higher is better)
-		// Angular distance is in range [0, 2], so score = 1 - dist/2
+		// Convert angular distance to similarity score (0-1, higher is better).
+		// Angular distance is in range [0, 2], so score = 1 - dist/2. Clamp to
+		// [0,1] so near-opposite vectors can't produce a negative score that
+		// breaks the documented range.
 		var score float32
 		if i < len(distances) {
 			score = 1.0 - distances[i]/2.0
+		}
+		if score < 0 {
+			score = 0
+		} else if score > 1 {
+			score = 1
 		}
 
 		results = append(results, SearchResult{
@@ -174,6 +185,25 @@ func (a *AnnoyIndex) Build(ctx context.Context, numTrees int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// The underlying library panics if Build is called on an already-built or
+	// loaded index. Recreate a fresh index containing exactly the items still in
+	// idToKey (copying their vectors from the current index) before building, so
+	// Build is safe to call after Load and dropped (removed) items don't linger.
+	if a.built {
+		old := a.idx
+		fresh := builder.Index[float32, uint32]().
+			AngularDistance(a.dimension).
+			UseMultiWorkerPolicy().
+			MmapIndexAllocator().
+			Build()
+		for id := range a.idToKey {
+			fresh.AddItem(id, old.GetItem(id))
+		}
+		_ = old.Close()
+		a.idx = fresh
+		a.built = false
+	}
+
 	a.idx.Build(numTrees, -1)
 	a.built = true
 	return nil
@@ -183,25 +213,40 @@ func (a *AnnoyIndex) Save(ctx context.Context) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	indexPath := filepath.Join(a.basePath, IndexFilename)
-	if err := a.idx.Save(indexPath); err != nil {
-		return fmt.Errorf("save index: %w", err)
-	}
-
 	mapping := indexMapping{
 		KeyToID: a.keyToID,
 		IDToKey: a.idToKey,
 		NextID:  a.nextID,
 	}
-
-	mappingPath := filepath.Join(a.basePath, MappingFilename)
 	data, err := json.Marshal(mapping)
 	if err != nil {
 		return fmt.Errorf("marshal mapping: %w", err)
 	}
 
-	if err := os.WriteFile(mappingPath, data, 0644); err != nil {
+	// Write both files to temp paths first, then rename into place, so an
+	// interrupted Save cannot leave index.ann and mapping.json out of sync.
+	indexPath := filepath.Join(a.basePath, IndexFilename)
+	indexTmp := indexPath + ".tmp"
+	if err := a.idx.Save(indexTmp); err != nil {
+		return fmt.Errorf("save index: %w", err)
+	}
+
+	// 0600: mapping.json holds memory keys, which may be sensitive on shared hosts.
+	mappingPath := filepath.Join(a.basePath, MappingFilename)
+	mappingTmp := mappingPath + ".tmp"
+	if err := os.WriteFile(mappingTmp, data, 0600); err != nil {
+		os.Remove(indexTmp)
 		return fmt.Errorf("write mapping: %w", err)
+	}
+
+	if err := os.Rename(indexTmp, indexPath); err != nil {
+		os.Remove(indexTmp)
+		os.Remove(mappingTmp)
+		return fmt.Errorf("commit index: %w", err)
+	}
+	if err := os.Rename(mappingTmp, mappingPath); err != nil {
+		os.Remove(mappingTmp)
+		return fmt.Errorf("commit mapping: %w", err)
 	}
 
 	a.dirty = false
