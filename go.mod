@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/fantasy v0.7.2
-	github.com/4thel00z/goannoy v0.1.0
+	github.com/4thel00z/goannoy v0.1.1
 	github.com/4thel00z/gollama.cpp v0.3.0-b6076
 	github.com/charmbracelet/fang v1.0.0
 	github.com/charmbracelet/x/term v0.2.2

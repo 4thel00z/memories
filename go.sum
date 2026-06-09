@@ -16,8 +16,8 @@ cloud.google.com/go/compute/metadata v0.9.0 h1:pDUj4QMoPejqq20dK0Pg2N4yG9zIkYGdB
 cloud.google.com/go/compute/metadata v0.9.0/go.mod h1:E0bWwX5wTnLPedCKqk3pJmVgCBSM6qQI1yTBdEb3C10=
 dario.cat/mergo v1.0.0 h1:AGCNq9Evsj31mOgNPcLyXc+4PNABt905YmuqPYYpBWk=
 dario.cat/mergo v1.0.0/go.mod h1:uNxQE+84aUszobStD9th8a29P2fMDhsBdgRYvZOxGmk=
-github.com/4thel00z/goannoy v0.1.0 h1:M8PRoy3/oEyqSGN3qXqXDbMrvq7aVnl7npC7yJlThvc=
-github.com/4thel00z/goannoy v0.1.0/go.mod h1:663FaXT4gj2/+o3Ykqd1eUImkQDidMLDZCp0SmCyq0w=
+github.com/4thel00z/goannoy v0.1.1 h1:50CfUn0O7TtQlsCyo6lUNSBJW4WnfUaGq9TEyyf4ykE=
+github.com/4thel00z/goannoy v0.1.1/go.mod h1:663FaXT4gj2/+o3Ykqd1eUImkQDidMLDZCp0SmCyq0w=
 github.com/4thel00z/gollama.cpp v0.3.0-b6076 h1:PwaMUUde/Tl8+bu2x9T4XfxtBycVbRg6cTbC20K3KsU=
 github.com/4thel00z/gollama.cpp v0.3.0-b6076/go.mod h1:cUNbJnqsAHOe4NYWKZ7ZcA0jQJAAosYJJc2y/LDc1lg=
 github.com/Microsoft/go-winio v0.5.2/go.mod h1:WpS1mjBmmwHBEWmogvA2mj8546UReBk4v8QkMxJ6pZY=
