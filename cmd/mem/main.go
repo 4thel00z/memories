@@ -122,9 +122,10 @@ func newApp(debug bool) *app {
 	rebuildIndexUC := internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, embedder)
 
 	// SetMemory keeps the vector index in sync incrementally, so the hook needs
-	// no separate reindex pass.
-	hookStoreFn := func(ctx context.Context, key, content string) error {
-		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content})
+	// no separate reindex pass. scope is the store the hook config was resolved
+	// from, so the commit memory lands there and not wherever Resolve("") picks.
+	hookStoreFn := func(ctx context.Context, scope, key, content string) error {
+		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content, Scope: scope})
 	}
 
 	uc := &internal.UseCases{

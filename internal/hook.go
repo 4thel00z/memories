@@ -367,7 +367,11 @@ func StrategyScript(ctx context.Context, cc CommitContext, scriptPath string) er
 // StoreFunc is a function that stores a memory key/value pair. The store path
 // keeps the vector index in sync incrementally, so the hook does not perform a
 // separate full reindex (which would otherwise block every commit).
-type StoreFunc func(ctx context.Context, key, content string) error
+//
+// scope is the scope (e.g. "global" or "project") the hook config was resolved
+// from, so the stored memory lands in the same store the hook was configured in
+// rather than wherever Resolve("") would independently pick.
+type StoreFunc func(ctx context.Context, scope, key, content string) error
 
 type RunHookInput struct {
 	HookType      string
@@ -398,6 +402,7 @@ func (uc *RunHookUseCase) Execute(_ context.Context, input RunHookInput) error {
 	// Search the cascade for the first scope whose post-commit hook is enabled,
 	// rather than silently no-opping on the wrong config.
 	var hc PostCommitHookConfig
+	var storeScope string
 	found := false
 	for _, scope := range uc.resolver.Cascade() {
 		cfg, err := LoadConfig(scope)
@@ -407,6 +412,9 @@ func (uc *RunHookUseCase) Execute(_ context.Context, input RunHookInput) error {
 		}
 		if cfg.Hooks.PostCommit.Enabled {
 			hc = cfg.Hooks.PostCommit
+			// Store into the same scope the config came from, so config-read and
+			// memory-write can't diverge to different stores.
+			storeScope = string(scope.Type)
 			found = true
 			break
 		}
@@ -447,14 +455,14 @@ func (uc *RunHookUseCase) Execute(_ context.Context, input RunHookInput) error {
 
 	switch strategy {
 	case "extract":
-		uc.runExtract(ctx, cc, baseKey, warn)
+		uc.runExtract(ctx, storeScope, cc, baseKey, warn)
 	case "summarize":
-		uc.runSummarize(ctx, cc, baseKey, warn)
+		uc.runSummarize(ctx, storeScope, cc, baseKey, warn)
 	case "script":
 		uc.runScript(ctx, cc, hc.Script, warn)
 	case "all":
-		uc.runExtract(ctx, cc, baseKey, warn)
-		uc.runSummarize(ctx, cc, baseKey+"/summary", warn)
+		uc.runExtract(ctx, storeScope, cc, baseKey, warn)
+		uc.runSummarize(ctx, storeScope, cc, baseKey+"/summary", warn)
 		if hc.Script != "" {
 			uc.runScript(ctx, cc, hc.Script, warn)
 		}
@@ -463,7 +471,7 @@ func (uc *RunHookUseCase) Execute(_ context.Context, input RunHookInput) error {
 	return nil
 }
 
-func (uc *RunHookUseCase) runExtract(ctx context.Context, cc CommitContext, key string, warn func(string, ...any)) {
+func (uc *RunHookUseCase) runExtract(ctx context.Context, scope string, cc CommitContext, key string, warn func(string, ...any)) {
 	result, err := StrategyExtract(cc)
 	if err != nil {
 		warn("extract: %v", err)
@@ -473,20 +481,20 @@ func (uc *RunHookUseCase) runExtract(ctx context.Context, cc CommitContext, key 
 		return
 	}
 	if uc.storeFn != nil {
-		if err := uc.storeFn(ctx, key, result); err != nil {
+		if err := uc.storeFn(ctx, scope, key, result); err != nil {
 			warn("extract store: %v", err)
 		}
 	}
 }
 
-func (uc *RunHookUseCase) runSummarize(ctx context.Context, cc CommitContext, key string, warn func(string, ...any)) {
+func (uc *RunHookUseCase) runSummarize(ctx context.Context, scope string, cc CommitContext, key string, warn func(string, ...any)) {
 	result, err := StrategySummarize(ctx, cc, uc.provider)
 	if err != nil {
 		warn("summarize: %v", err)
 		return
 	}
 	if uc.storeFn != nil {
-		if err := uc.storeFn(ctx, key, result); err != nil {
+		if err := uc.storeFn(ctx, scope, key, result); err != nil {
 			warn("summarize store: %v", err)
 		}
 	}

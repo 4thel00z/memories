@@ -311,8 +311,9 @@ func TestRunHookUseCase_Extract(t *testing.T) {
 	}
 	require.NoError(t, SaveConfig(scope, cfg))
 
-	var storedKey, storedContent string
-	storeFn := func(_ context.Context, key, content string) error {
+	var storedScope, storedKey, storedContent string
+	storeFn := func(_ context.Context, scope, key, content string) error {
+		storedScope = scope
 		storedKey = key
 		storedContent = content
 		return nil
@@ -330,6 +331,9 @@ func TestRunHookUseCase_Extract(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, storedKey, "hooks/commits/abc1234")
 	assert.Contains(t, storedContent, "NewHandler")
+	// The store must target the same scope the config was resolved from, not
+	// whatever Resolve("") would independently pick.
+	assert.Equal(t, string(ScopeProject), storedScope)
 }
 
 func TestRunHookUseCase_Disabled(t *testing.T) {
