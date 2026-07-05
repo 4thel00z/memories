@@ -82,10 +82,10 @@ mem branch main
 
 | Command | Description |
 |---------|-------------|
-| `mem set <key> <value>` | Create or update a memory (auto-commits) |
+| `mem set <key> [value]` | Create or update a memory (reads stdin if no value; auto-commits) |
 | `mem get <key>` | Retrieve a memory's content |
-| `mem del <key>` | Delete a memory (auto-commits) |
-| `mem list [prefix]` | List memories, optionally filtered by prefix |
+| `mem del <key>` | Delete a memory (auto-commits; aliases: `delete`, `rm`) |
+| `mem list [prefix]` | List memories, optionally filtered by prefix (alias: `ls`) |
 | `mem add <key> [content]` | Append content to a memory (reads stdin if no content) |
 | `mem edit <key>` | Open a memory in `$EDITOR` (auto-commits on save) |
 
@@ -93,8 +93,8 @@ mem branch main
 
 | Command | Description |
 |---------|-------------|
-| `mem commit [-m "msg"]` | Commit staged changes (opens `$EDITOR` if no `-m`) |
-| `mem status` | Show current branch |
+| `mem commit [-m "msg"]` | Commit pending changes, including hand edits (opens `$EDITOR` if no `-m`) |
+| `mem status` | Show current branch and whether the tree is dirty |
 | `mem log [-n N] [--oneline]` | Show commit history |
 | `mem diff [ref]` | Show uncommitted changes |
 
@@ -112,6 +112,7 @@ mem branch main
 |---------|-------------|
 | `mem search <query>` | Keyword search (content + key matching) |
 | `mem search -s <query>` | Semantic search (requires embedder) |
+| `mem search -n <N> <query>` | Limit the number of results |
 
 ### AI Features
 
@@ -122,13 +123,14 @@ mem branch main
 | `mem provider add <name>` | Add an LLM provider |
 | `mem provider remove <name>` | Remove a provider |
 | `mem provider default <name>` | Set the default provider |
+| `mem provider test <name>` | Test a provider's connectivity |
 
 ### Index Management
 
 | Command | Description |
 |---------|-------------|
-| `mem index rebuild` | Rebuild the vector search index |
-| `mem index status` | Show index statistics |
+| `mem index rebuild [--trees N]` | Rebuild the vector search index |
+| `mem index status` | Show index statistics (existence, vectors, dimension, size) |
 
 ### Git Hooks
 
@@ -136,7 +138,7 @@ mem branch main
 |---------|-------------|
 | `mem install` | Install a post-commit hook for automatic memory updates |
 | `mem install --strategy <s>` | Set strategy: `extract`, `summarize`, `script`, or `all` |
-| `mem install --force` | Overwrite existing hook (backs up original to `.bak`) |
+| `mem install --force` | Overwrite existing hook (backs up original to `.mem.bak`) |
 | `mem install --script <path>` | Path to custom script (for `script` or `all` strategy) |
 | `mem uninstall` | Remove the mem post-commit hook (restores backup if present) |
 | `mem uninstall --keep-config` | Remove hook but keep config in `.mem/config.yaml` |
@@ -159,8 +161,8 @@ mem branch main
 | Flag | Description |
 |------|-------------|
 | `--scope=<global\|project>` | Target scope |
-| `--branch=<name>` | Target branch |
-| `--json` | JSON output |
+| `--json` | JSON output (`get`, `list`, `log`, `search`, `summarize`, `status`, `branch`, `provider list`, `index status`) |
+| `--debug` | Verbose output (e.g. model loading logs) |
 
 ## Scopes
 
@@ -220,14 +222,14 @@ mem install
 # Install with all strategies and a custom script
 mem install --strategy all --script ./hooks/post-commit-custom.sh
 
-# Overwrite an existing hook (backs up to post-commit.bak)
+# Overwrite an existing hook (backs up to post-commit.mem.bak)
 mem install --force
 
 # Remove the hook (restores original if backed up)
 mem uninstall
 ```
 
-After installation, memories are stored under `hooks/commits/<short-hash>` and the vector index is rebuilt asynchronously.
+After installation, memories are stored under `hooks/commits/<short-hash>` and the vector index is updated incrementally as part of the write — no separate reindex pass.
 
 ## Public API
 
@@ -244,6 +246,14 @@ import (
 )
 
 func main() {
+    // Create ./.mem on first use; a no-op when the store already exists.
+    if err := mem.Init(); err != nil {
+        panic(err)
+    }
+
+    // New requires a project .mem store in the working directory tree.
+    // Pass mem.WithScope("global") to use ~/.mem instead — unlike the CLI,
+    // the library never falls back to the global store implicitly.
     client, err := mem.New()
     if err != nil {
         panic(err)
@@ -340,16 +350,12 @@ func main() {
 
 ```
 .mem/
-├── objects/          # Git object storage
-├── refs/
-│   └── heads/
-│       └── main     # Default branch
-├── HEAD             # Current branch ref
-├── index            # Git staging area
-├── config.yaml      # Mem configuration
+├── .git/             # Git repository (objects, refs/heads/main, HEAD, index)
+├── <key files>       # One file per memory, nested by key path
+├── config.yaml       # Mem configuration
 └── vectors/
-    ├── index.ann    # Annoy vector index
-    └── mapping.json # Key-to-ID mapping
+    ├── index.ann     # Annoy vector index
+    └── mapping.json  # Key-to-ID mapping
 ```
 
 ## Claude Code Skill
@@ -363,9 +369,9 @@ mem ships with a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-c
 mem skill install
 ```
 
-This downloads the latest `using-mem` skill into `.claude/skills/using-mem/SKILL.md`.
+This writes the bundled `using-mem` skill (embedded in the binary) to `.claude/skills/using-mem/SKILL.md`.
 
-Alternatively, install manually:
+Alternatively, install the latest version from GitHub manually:
 
 ```bash
 mkdir -p .claude/skills/using-mem
