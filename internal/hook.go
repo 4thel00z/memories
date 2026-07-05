@@ -296,12 +296,7 @@ func StrategyExtract(ctx CommitContext) (string, error) {
 		return "", nil
 	}
 
-	shortHash := ctx.Hash
-	if len(shortHash) > 7 {
-		shortHash = shortHash[:7]
-	}
-
-	return fmt.Sprintf("[%s] %s — %s", shortHash, ctx.Message, strings.Join(parts, "; ")), nil
+	return fmt.Sprintf("[%s] %s — %s", ShortHash(ctx.Hash), ctx.Message, strings.Join(parts, "; ")), nil
 }
 
 func uniqueMatches(matches [][]string) []string {
@@ -433,11 +428,7 @@ func (uc *RunHookUseCase) Execute(_ context.Context, input RunHookInput) error {
 		prefix = "hooks/commits"
 	}
 
-	shortHash := cc.Hash
-	if len(shortHash) > 7 {
-		shortHash = shortHash[:7]
-	}
-	baseKey := fmt.Sprintf("%s/%s", prefix, shortHash)
+	baseKey := fmt.Sprintf("%s/%s", prefix, ShortHash(cc.Hash))
 
 	strategy := hc.Strategy
 	if strategy == "" {

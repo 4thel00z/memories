@@ -29,4 +29,7 @@ type VectorIndex interface {
 	Save(ctx context.Context) error
 	Load(ctx context.Context) error
 	Contains(ctx context.Context, key Key) bool
+	// Close releases index resources (e.g. mmap handles). The index is
+	// unusable afterwards.
+	Close() error
 }

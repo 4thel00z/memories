@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/4thel00z/memories/internal"
 )
 
 const externalPrefix = "mem-"
@@ -77,7 +80,7 @@ func executeExternal(ctx context.Context, name string, args []string, version st
 	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Env = buildExternalEnv(version)
+	cmd.Env = buildExternalEnv(ctx, version)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -85,15 +88,24 @@ func executeExternal(ctx context.Context, name string, args []string, version st
 	return cmd.Run()
 }
 
-func buildExternalEnv(version string) []string {
-	memBin, _ := os.Executable()
-	cwd, _ := os.Getwd()
+func buildExternalEnv(ctx context.Context, version string) []string {
+	resolver := internal.NewScopeResolver()
+	scope := resolver.Resolve("")
+
+	// Read HEAD directly instead of opening the repository: this runs on
+	// every plugin dispatch. An uninitialized store leaves MEM_BRANCH empty.
+	branch := internal.HeadBranch(scope)
+
+	vars := resolver.EnvVars(scope, branch, version)
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 
 	env := os.Environ()
-	env = append(env,
-		"MEM_VERSION="+version,
-		"MEM_BIN="+memBin,
-		"MEM_ROOT="+cwd,
-	)
+	for _, k := range keys {
+		env = append(env, k+"="+vars[k])
+	}
 	return env
 }

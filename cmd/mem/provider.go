@@ -110,6 +110,20 @@ func newProviderListCmd(listUC *internal.ProviderListUseCase) *cobra.Command {
 				return fmt.Errorf("list providers: %w", err)
 			}
 
+			if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+				list := make([]map[string]any, 0, len(items))
+				for _, item := range items {
+					list = append(list, map[string]any{
+						"name":     item.Name,
+						"default":  item.IsDefault,
+						"base_url": item.Config.BaseURL,
+						"model":    item.Config.Model,
+						"api_key":  maskSecret(item.Config.APIKey),
+					})
+				}
+				return printJSON(cmd.OutOrStdout(), list)
+			}
+
 			if len(items) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No providers configured.")
 				return nil

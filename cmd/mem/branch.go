@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -61,6 +62,18 @@ func listBranches(cmd *cobra.Command, currentUC *internal.BranchCurrentUseCase, 
 		return fmt.Errorf("list branches: %w", err)
 	}
 
+	if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+		branches := make([]map[string]any, 0, len(out.Branches))
+		for _, b := range out.Branches {
+			branches = append(branches, map[string]any{
+				"name":    b.Name,
+				"head":    b.Head,
+				"current": b.Name == current.Name,
+			})
+		}
+		return printJSON(cmd.OutOrStdout(), branches)
+	}
+
 	for _, b := range out.Branches {
 		prefix := "  "
 		if b.Name == current.Name {
@@ -80,12 +93,22 @@ func deleteBranch(cmd *cobra.Command, deleteUC *internal.BranchDeleteUseCase, na
 }
 
 func createAndSwitchBranch(cmd *cobra.Command, createUC *internal.BranchCreateUseCase, switchUC *internal.BranchSwitchUseCase, name, scopeHint string) error {
+	created := true
 	if _, err := createUC.Execute(cmd.Context(), internal.BranchInput{Name: name, Scope: scopeHint}); err != nil {
-		return fmt.Errorf("create branch: %w", err)
+		// An existing branch is switched to, never re-created (which would
+		// force-move it onto the current HEAD).
+		if !errors.Is(err, internal.ErrBranchExists) {
+			return fmt.Errorf("create branch: %w", err)
+		}
+		created = false
 	}
 	if err := switchUC.Execute(cmd.Context(), internal.BranchInput{Name: name, Scope: scopeHint}); err != nil {
 		return fmt.Errorf("switch branch: %w", err)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Switched to new branch %s\n", name)
+	if created {
+		fmt.Fprintf(cmd.OutOrStdout(), "Switched to new branch %s\n", name)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "Switched to branch %s\n", name)
+	}
 	return nil
 }

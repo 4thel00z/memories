@@ -118,7 +118,9 @@ func (a *AnnoyIndex) Remove(ctx context.Context, key Key) error {
 	delete(a.keyToID, keyStr)
 	delete(a.idToKey, id)
 	a.dirty = true
-	a.built = false
+	// built stays as-is: when it is true, the next Build takes the
+	// recreate-from-idToKey branch, which both drops this vector and avoids
+	// goannoy's panic on building an already-built or loaded index.
 
 	return nil
 }
@@ -235,17 +237,17 @@ func (a *AnnoyIndex) Save(ctx context.Context) error {
 	mappingPath := filepath.Join(a.basePath, MappingFilename)
 	mappingTmp := mappingPath + ".tmp"
 	if err := os.WriteFile(mappingTmp, data, 0600); err != nil {
-		os.Remove(indexTmp)
+		_ = os.Remove(indexTmp)
 		return fmt.Errorf("write mapping: %w", err)
 	}
 
 	if err := os.Rename(indexTmp, indexPath); err != nil {
-		os.Remove(indexTmp)
-		os.Remove(mappingTmp)
+		_ = os.Remove(indexTmp)
+		_ = os.Remove(mappingTmp)
 		return fmt.Errorf("commit index: %w", err)
 	}
 	if err := os.Rename(mappingTmp, mappingPath); err != nil {
-		os.Remove(mappingTmp)
+		_ = os.Remove(mappingTmp)
 		return fmt.Errorf("commit mapping: %w", err)
 	}
 
@@ -295,4 +297,18 @@ func (a *AnnoyIndex) Contains(ctx context.Context, key Key) bool {
 
 	_, exists := a.keyToID[key.String()]
 	return exists
+}
+
+// Close releases the mmap-backed index handle. The index is unusable after
+// Close; create a new one with NewAnnoyIndex.
+func (a *AnnoyIndex) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.idx == nil {
+		return nil
+	}
+	err := a.idx.Close()
+	a.idx = nil
+	return err
 }

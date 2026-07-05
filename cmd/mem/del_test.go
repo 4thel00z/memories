@@ -48,13 +48,11 @@ func TestDelCmd(t *testing.T) {
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
 	delUC := internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex)
-	commitUC := internal.NewCommitUseCase(resolver, histFor)
 
-	cmd := NewDelCmd(delUC, commitUC)
+	cmd := NewDelCmd(delUC)
 	cmd.SetArgs([]string{"to-delete"})
 
 	var out bytes.Buffer
@@ -96,13 +94,11 @@ func TestDelCmdNotFound(t *testing.T) {
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
 	delUC := internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex)
-	commitUC := internal.NewCommitUseCase(resolver, histFor)
 
-	cmd := NewDelCmd(delUC, commitUC)
+	cmd := NewDelCmd(delUC)
 	cmd.SetArgs([]string{"nonexistent"})
 
 	var out bytes.Buffer

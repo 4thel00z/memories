@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,33 +115,23 @@ func TestExtractExternalNameNotExecutable(t *testing.T) {
 }
 
 func TestBuildExternalEnv(t *testing.T) {
-	env := buildExternalEnv("1.0.0")
+	env := buildExternalEnv(context.Background(), "1.0.0")
 
-	hasVersion := false
-	hasBin := false
-	hasRoot := false
-
+	got := make(map[string]string)
 	for _, e := range env {
-		switch {
-		case len(e) > 12 && e[:12] == "MEM_VERSION=":
-			hasVersion = true
-			if e[12:] != "1.0.0" {
-				t.Errorf("expected MEM_VERSION=1.0.0, got %s", e)
-			}
-		case len(e) > 8 && e[:8] == "MEM_BIN=":
-			hasBin = true
-		case len(e) > 9 && e[:9] == "MEM_ROOT=":
-			hasRoot = true
+		if k, v, ok := strings.Cut(e, "="); ok && strings.HasPrefix(k, "MEM_") {
+			got[k] = v
 		}
 	}
 
-	if !hasVersion {
-		t.Error("MEM_VERSION not found in env")
+	// MEM_BRANCH is always present, but may be empty outside an initialized store.
+	for _, k := range []string{"MEM_SCOPE", "MEM_SCOPE_PATH", "MEM_ROOT", "MEM_BRANCH", "MEM_CONFIG", "MEM_VERSION", "MEM_BIN"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s not found in env", k)
+		}
 	}
-	if !hasBin {
-		t.Error("MEM_BIN not found in env")
-	}
-	if !hasRoot {
-		t.Error("MEM_ROOT not found in env")
+
+	if got["MEM_VERSION"] != "1.0.0" {
+		t.Errorf("expected MEM_VERSION=1.0.0, got %q", got["MEM_VERSION"])
 	}
 }

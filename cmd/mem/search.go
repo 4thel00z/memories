@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -82,7 +81,5 @@ func outputSearchResultsJSON(cmd *cobra.Command, results []internal.SearchResult
 		})
 	}
 
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return printJSON(cmd.OutOrStdout(), out)
 }

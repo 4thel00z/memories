@@ -68,9 +68,7 @@ func TestInitCmdAlreadyInitialized(t *testing.T) {
 func TestInitCmdGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	origHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", origHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{"--global"})

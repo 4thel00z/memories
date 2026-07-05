@@ -31,7 +31,6 @@ func NewRootCmd(version string, a *app) *cobra.Command {
 
 func addPersistentFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("scope", "", "Target scope (global|project)")
-	cmd.PersistentFlags().String("branch", "", "Target branch")
 	cmd.PersistentFlags().Bool("json", false, "Output in JSON format")
 	cmd.PersistentFlags().Bool("debug", false, "Enable verbose output (e.g. model loading logs)")
 }
@@ -40,21 +39,21 @@ func addSubcommands(root *cobra.Command, a *app) {
 	uc := a.uc
 	root.AddCommand(
 		NewInitCmd(),
-		NewSetCmd(uc.SetMemory, uc.Commit),
+		NewSetCmd(uc.SetMemory),
 		NewGetCmd(uc.GetMemory),
-		NewDelCmd(uc.DeleteMemory, uc.Commit),
+		NewDelCmd(uc.DeleteMemory),
 		NewListCmd(uc.ListMemories),
 		NewAddCmd(uc.AddMemory),
 		NewCommitCmd(uc.Commit),
-		NewStatusCmd(uc.BranchCurrent),
+		NewStatusCmd(uc.BranchCurrent, uc.Diff),
 		NewLogCmd(uc.Log),
 		NewDiffCmd(uc.Diff),
 		NewBranchCmd(uc.BranchCurrent, uc.BranchList, uc.BranchCreate, uc.BranchSwitch, uc.BranchDelete),
 		NewSearchCmd(uc.KeywordSearch, uc.SemanticSearch),
 		NewProviderCmd(uc.ProviderList, uc.ProviderAdd, uc.ProviderRemove, uc.ProviderSetDef, uc.ProviderTest),
-		NewIndexCmd(uc.RebuildIndex),
+		NewIndexCmd(uc.RebuildIndex, uc.IndexStatus),
 		NewSummarizeCmd(uc.Summarize),
-		NewEditCmd(uc.GetMemory, uc.SetMemory, uc.Commit),
+		NewEditCmd(uc.GetMemory, uc.SetMemory),
 		NewWatchCmd(uc.Commit),
 		NewSkillCmd(),
 		NewInstallCmd(uc.InstallHook),

@@ -32,10 +32,12 @@ func TestStatusCmd(t *testing.T) {
 
 	resolver := internal.NewScopeResolver()
 	branchFor := func(s internal.Scope) (internal.BranchRepository, error) { return repo, nil }
+	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 
 	currentUC := internal.NewBranchCurrentUseCase(resolver, branchFor)
+	diffUC := internal.NewDiffUseCase(resolver, histFor)
 
-	cmd := NewStatusCmd(currentUC)
+	cmd := NewStatusCmd(currentUC, diffUC)
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -46,5 +48,8 @@ func TestStatusCmd(t *testing.T) {
 
 	if !strings.Contains(out.String(), "On branch") {
 		t.Errorf("expected 'On branch' in output, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Working tree clean") {
+		t.Errorf("expected clean working tree in output, got %q", out.String())
 	}
 }

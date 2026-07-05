@@ -31,13 +31,11 @@ func TestSetCmd(t *testing.T) {
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
 	setUC := internal.NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
-	commitUC := internal.NewCommitUseCase(resolver, histFor)
 
-	cmd := NewSetCmd(setUC, commitUC)
+	cmd := NewSetCmd(setUC)
 	cmd.SetArgs([]string{"test/key", "test value"})
 
 	var out bytes.Buffer
@@ -80,14 +78,12 @@ func TestSetCmdOverwrite(t *testing.T) {
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
 	setUC := internal.NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
-	commitUC := internal.NewCommitUseCase(resolver, histFor)
 
 	// Set initial value
-	cmd := NewSetCmd(setUC, commitUC)
+	cmd := NewSetCmd(setUC)
 	cmd.SetArgs([]string{"mykey", "first"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -96,7 +92,7 @@ func TestSetCmdOverwrite(t *testing.T) {
 	}
 
 	// Overwrite
-	cmd2 := NewSetCmd(setUC, commitUC)
+	cmd2 := NewSetCmd(setUC)
 	cmd2.SetArgs([]string{"mykey", "second"})
 	cmd2.SetOut(&out)
 	if err := cmd2.Execute(); err != nil {

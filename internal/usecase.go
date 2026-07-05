@@ -2,9 +2,12 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +19,9 @@ type SetMemoryInput struct {
 	Key     string
 	Content string
 	Scope   string
+	// CommitMessage, when set, commits the write in the same locked operation
+	// so a concurrent process cannot interleave between write and commit.
+	CommitMessage string
 }
 
 type GetMemoryInput struct {
@@ -33,6 +39,9 @@ type GetMemoryOutput struct {
 type DeleteMemoryInput struct {
 	Key   string
 	Scope string
+	// CommitMessage, when set, commits the removal in the same locked
+	// operation. See SetMemoryInput.CommitMessage.
+	CommitMessage string
 }
 
 type ListMemoriesInput struct {
@@ -152,13 +161,6 @@ type AddMemoryInput struct {
 	Message string
 }
 
-type EditMemoryInput struct {
-	Key     string
-	Content string
-	Scope   string
-	Message string
-}
-
 // UseCases is the holder struct that aggregates all use cases.
 type UseCases struct {
 	SetMemory      *SetMemoryUseCase
@@ -166,7 +168,6 @@ type UseCases struct {
 	DeleteMemory   *DeleteMemoryUseCase
 	ListMemories   *ListMemoriesUseCase
 	AddMemory      *AddMemoryUseCase
-	EditMemory     *EditMemoryUseCase
 	Commit         *CommitUseCase
 	Log            *LogUseCase
 	Diff           *DiffUseCase
@@ -174,6 +175,7 @@ type UseCases struct {
 	KeywordSearch  *KeywordSearchUseCase
 	SemanticSearch *SemanticSearchUseCase
 	RebuildIndex   *RebuildIndexUseCase
+	IndexStatus    *IndexStatusUseCase
 	Summarize      *SummarizeUseCase
 	AutoTag        *AutoTagUseCase
 	BranchCurrent  *BranchCurrentUseCase
@@ -247,30 +249,64 @@ func (uc *SetMemoryUseCase) Execute(ctx context.Context, input SetMemoryInput) e
 		UpdatedAt: time.Now(),
 	}
 
-	if err := repo.Save(ctx, mem); err != nil {
+	message := input.CommitMessage
+	if message == "" {
+		message = fmt.Sprintf("set: %s", input.Key)
+	}
+
+	commit, err := commitWrite(ctx, repo, mem, message)
+	if err != nil {
 		return fmt.Errorf("save memory: %w", err)
 	}
-
-	if uc.embedder == nil || uc.indexFor == nil {
+	if commit == nil {
+		// Unchanged content: nothing to embed or re-index either.
 		return nil
 	}
 
-	index, err := uc.indexFor(scope)
+	updateIndex(ctx, uc.indexFor, uc.embedder, scope, key, input.Content)
+	return nil
+}
+
+// updateIndex embeds content and persists it into the scope's vector index.
+// Failures are logged rather than returned: the memory write has already
+// succeeded, and search staleness is recoverable via `mem index rebuild`.
+func updateIndex(ctx context.Context, indexFor func(Scope) (VectorIndex, error), embedder Embedder, scope Scope, key Key, content string) {
+	if embedder == nil || indexFor == nil {
+		return
+	}
+
+	index, err := indexFor(scope)
 	if err != nil {
 		slog.Warn("skipping index update: failed to get index", "error", err)
-		return nil
+		return
 	}
+	defer closeIndex(index)
 
-	vec, err := uc.embedder.Embed(ctx, input.Content)
+	vec, err := embedder.Embed(ctx, content)
 	if err != nil {
 		slog.Warn("skipping index update: embedding failed", "error", err)
-		return nil
+		return
 	}
 
-	emb := NewEmbedding(vec, "local")
-	persistIndexUpdate(ctx, index, key, emb)
+	persistIndexUpdate(ctx, index, key, NewEmbedding(vec, "local"))
+}
 
-	return nil
+// closeIndex releases an index's resources (e.g. mmap handles) once a use case
+// is done with it; failures are logged since there is nothing to recover.
+func closeIndex(index VectorIndex) {
+	if err := index.Close(); err != nil {
+		slog.Warn("index close failed", "error", err)
+	}
+}
+
+// commitWrite persists a memory and commits it under one lock. It returns the
+// commit, or nil when the write changed nothing.
+func commitWrite(ctx context.Context, repo MemoryRepository, mem *Memory, message string) (*Commit, error) {
+	atomic, ok := repo.(AtomicRepository)
+	if !ok {
+		return nil, fmt.Errorf("repository does not support atomic save+commit")
+	}
+	return atomic.SaveAndCommit(ctx, mem, message)
 }
 
 // persistIndexUpdate adds an embedding to the index and then rebuilds and saves
@@ -390,13 +426,23 @@ func (uc *DeleteMemoryUseCase) Execute(ctx context.Context, input DeleteMemoryIn
 		return fmt.Errorf("get repository: %w", err)
 	}
 
-	if err := repo.Delete(ctx, key); err != nil {
+	message := input.CommitMessage
+	if message == "" {
+		message = fmt.Sprintf("del: %s", input.Key)
+	}
+
+	atomic, ok := repo.(AtomicRepository)
+	if !ok {
+		return fmt.Errorf("repository does not support atomic delete+commit")
+	}
+	if _, err := atomic.DeleteAndCommit(ctx, key, message); err != nil {
 		return fmt.Errorf("delete memory: %w", err)
 	}
 
 	if uc.indexFor != nil {
 		if index, err := uc.indexFor(scope); err == nil {
 			persistIndexRemoval(ctx, index, key)
+			closeIndex(index)
 		}
 	}
 
@@ -453,7 +499,6 @@ func (uc *ListMemoriesUseCase) Execute(ctx context.Context, input ListMemoriesIn
 type AddMemoryUseCase struct {
 	resolver *ScopeResolver
 	repoFor  func(Scope) (MemoryRepository, error)
-	histFor  func(Scope) (HistoryRepository, error)
 	indexFor func(Scope) (VectorIndex, error)
 	embedder Embedder
 	ignore   func(Scope) (*IgnoreMatcher, error)
@@ -462,7 +507,6 @@ type AddMemoryUseCase struct {
 func NewAddMemoryUseCase(
 	resolver *ScopeResolver,
 	repoFor func(Scope) (MemoryRepository, error),
-	histFor func(Scope) (HistoryRepository, error),
 	indexFor func(Scope) (VectorIndex, error),
 	embedder Embedder,
 	ignore func(Scope) (*IgnoreMatcher, error),
@@ -470,7 +514,6 @@ func NewAddMemoryUseCase(
 	return &AddMemoryUseCase{
 		resolver: resolver,
 		repoFor:  repoFor,
-		histFor:  histFor,
 		indexFor: indexFor,
 		embedder: embedder,
 		ignore:   ignore,
@@ -520,135 +563,20 @@ func (uc *AddMemoryUseCase) Execute(ctx context.Context, input AddMemoryInput) (
 		UpdatedAt: time.Now(),
 	}
 
-	if err := repo.Save(ctx, mem); err != nil {
-		return nil, fmt.Errorf("save memory: %w", err)
-	}
-
 	message := input.Message
 	if message == "" {
 		message = fmt.Sprintf("add: append to %s", input.Key)
 	}
 
-	hist, err := uc.histFor(scope)
+	commit, err := commitWrite(ctx, repo, mem, message)
 	if err != nil {
-		return nil, fmt.Errorf("get history repository: %w", err)
-	}
-
-	commit, err := hist.Commit(ctx, message)
-	if err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
-	}
-
-	if uc.embedder != nil && uc.indexFor != nil {
-		if index, err := uc.indexFor(scope); err == nil {
-			if vec, err := uc.embedder.Embed(ctx, string(newContent)); err == nil {
-				emb := NewEmbedding(vec, "local")
-				persistIndexUpdate(ctx, index, key, emb)
-			} else {
-				slog.Warn("skipping index update: embedding failed", "error", err)
-			}
-		} else {
-			slog.Warn("skipping index update: failed to get index", "error", err)
-		}
-	}
-
-	return &CommitOutput{
-		Hash:      commit.Hash,
-		Message:   commit.Message,
-		Timestamp: commit.Timestamp,
-	}, nil
-}
-
-// --- EditMemoryUseCase ---
-
-type EditMemoryUseCase struct {
-	resolver *ScopeResolver
-	repoFor  func(Scope) (MemoryRepository, error)
-	histFor  func(Scope) (HistoryRepository, error)
-	indexFor func(Scope) (VectorIndex, error)
-	embedder Embedder
-	ignore   func(Scope) (*IgnoreMatcher, error)
-}
-
-func NewEditMemoryUseCase(
-	resolver *ScopeResolver,
-	repoFor func(Scope) (MemoryRepository, error),
-	histFor func(Scope) (HistoryRepository, error),
-	indexFor func(Scope) (VectorIndex, error),
-	embedder Embedder,
-	ignore func(Scope) (*IgnoreMatcher, error),
-) *EditMemoryUseCase {
-	return &EditMemoryUseCase{
-		resolver: resolver,
-		repoFor:  repoFor,
-		histFor:  histFor,
-		indexFor: indexFor,
-		embedder: embedder,
-		ignore:   ignore,
-	}
-}
-
-func (uc *EditMemoryUseCase) Execute(ctx context.Context, input EditMemoryInput) (*CommitOutput, error) {
-	key, err := NewKey(input.Key)
-	if err != nil {
-		return nil, err
-	}
-
-	scope := uc.resolver.Resolve(input.Scope)
-
-	if uc.ignore != nil {
-		matcher, err := uc.ignore(scope)
-		if err != nil {
-			return nil, fmt.Errorf("check .memignore: %w", err)
-		}
-		if matcher.MatchKey(key) {
-			return nil, fmt.Errorf("key %q is blocked by .memignore", input.Key)
-		}
-	}
-
-	repo, err := uc.repoFor(scope)
-	if err != nil {
-		return nil, fmt.Errorf("get repository: %w", err)
-	}
-
-	mem := &Memory{
-		Key:       key,
-		Content:   []byte(input.Content),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	if err := repo.Save(ctx, mem); err != nil {
 		return nil, fmt.Errorf("save memory: %w", err)
 	}
-
-	message := input.Message
-	if message == "" {
-		message = fmt.Sprintf("edit: update %s", input.Key)
+	if commit == nil {
+		return &CommitOutput{Message: message}, nil
 	}
 
-	hist, err := uc.histFor(scope)
-	if err != nil {
-		return nil, fmt.Errorf("get history repository: %w", err)
-	}
-
-	commit, err := hist.Commit(ctx, message)
-	if err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
-	}
-
-	if uc.embedder != nil && uc.indexFor != nil {
-		if index, err := uc.indexFor(scope); err == nil {
-			if vec, err := uc.embedder.Embed(ctx, input.Content); err == nil {
-				emb := NewEmbedding(vec, "local")
-				persistIndexUpdate(ctx, index, key, emb)
-			} else {
-				slog.Warn("skipping index update: embedding failed", "error", err)
-			}
-		} else {
-			slog.Warn("skipping index update: failed to get index", "error", err)
-		}
-	}
+	updateIndex(ctx, uc.indexFor, uc.embedder, scope, key, string(newContent))
 
 	return &CommitOutput{
 		Hash:      commit.Hash,
@@ -681,9 +609,19 @@ func (uc *CommitUseCase) Execute(ctx context.Context, input CommitInput) (*Commi
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
 
-	commit, err := hist.Commit(ctx, input.Message)
+	// Prefer CommitAll so hand edits to store files — which nothing ever
+	// stages — are committed too, not just changes staged by mem itself.
+	var commit *Commit
+	if all, ok := hist.(AllCommitter); ok {
+		commit, err = all.CommitAll(ctx, input.Message)
+	} else {
+		commit, err = hist.Commit(ctx, input.Message)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if commit == nil {
+		return nil, ErrNothingToCommit
 	}
 
 	return &CommitOutput{
@@ -767,6 +705,28 @@ func (uc *DiffUseCase) Execute(ctx context.Context, input DiffInput) (*DiffOutpu
 	}
 
 	return &DiffOutput{Diff: diff}, nil
+}
+
+// Clean reports whether the scope has pending memory changes, without the
+// cost of rendering a full diff when the repository offers a cheap check.
+func (uc *DiffUseCase) Clean(ctx context.Context, scopeHint string) (bool, error) {
+	scope := uc.resolver.Resolve(scopeHint)
+	hist, err := uc.histFor(scope)
+	if err != nil {
+		return false, fmt.Errorf("get repository: %w", err)
+	}
+
+	if c, ok := hist.(interface {
+		Clean(ctx context.Context) (bool, error)
+	}); ok {
+		return c.Clean(ctx)
+	}
+
+	diff, err := hist.Diff(ctx, "")
+	if err != nil {
+		return false, err
+	}
+	return diff == "", nil
 }
 
 // --- RevertUseCase ---
@@ -874,6 +834,7 @@ func (uc *SemanticSearchUseCase) Execute(ctx context.Context, input SearchInput)
 	if err != nil {
 		return nil, fmt.Errorf("get index: %w", err)
 	}
+	defer closeIndex(index)
 
 	vec, err := uc.embedder.Embed(ctx, input.Query)
 	if err != nil {
@@ -938,6 +899,7 @@ func (uc *RebuildIndexUseCase) Execute(ctx context.Context, input RebuildIndexIn
 	if err != nil {
 		return fmt.Errorf("get index: %w", err)
 	}
+	defer closeIndex(index)
 
 	memories, err := repo.List(ctx, "")
 	if err != nil {
@@ -980,6 +942,64 @@ func (uc *RebuildIndexUseCase) Execute(ctx context.Context, input RebuildIndexIn
 	}
 
 	return index.Save(ctx)
+}
+
+// --- IndexStatusUseCase ---
+
+type IndexStatusInput struct {
+	Scope string
+}
+
+// IndexStats describes the on-disk vector index. It is computed from the index
+// files directly, so it never triggers an embedding-model load.
+type IndexStats struct {
+	Exists    bool   `json:"exists"`
+	Path      string `json:"path"`
+	Vectors   int    `json:"vectors"`
+	Dimension int    `json:"dimension"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+type IndexStatusUseCase struct {
+	resolver *ScopeResolver
+}
+
+func NewIndexStatusUseCase(resolver *ScopeResolver) *IndexStatusUseCase {
+	return &IndexStatusUseCase{resolver: resolver}
+}
+
+func (uc *IndexStatusUseCase) Execute(ctx context.Context, input IndexStatusInput) (*IndexStats, error) {
+	scope := uc.resolver.Resolve(input.Scope)
+	base := scope.VectorPath()
+	stats := &IndexStats{Path: base}
+
+	info, err := os.Stat(filepath.Join(base, IndexFilename))
+	if os.IsNotExist(err) {
+		return stats, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat index: %w", err)
+	}
+	stats.Exists = true
+	stats.SizeBytes = info.Size()
+
+	data, err := os.ReadFile(filepath.Join(base, MappingFilename))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read mapping: %w", err)
+	}
+	if err == nil {
+		var m indexMapping
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, fmt.Errorf("parse mapping: %w", err)
+		}
+		stats.Vectors = len(m.KeyToID)
+	}
+
+	if cfg, err := LoadConfig(scope); err == nil {
+		stats.Dimension = cfg.Embeddings.Dimension
+	}
+
+	return stats, nil
 }
 
 // --- SummarizeUseCase ---
@@ -1025,7 +1045,7 @@ func (uc *SummarizeUseCase) Execute(ctx context.Context, input SummarizeInput) (
 	var sb strings.Builder
 	sb.WriteString("Summarize the following memories:\n\n")
 	for _, mem := range memories {
-		sb.WriteString(fmt.Sprintf("## %s\n%s\n\n", mem.Key, string(mem.Content)))
+		fmt.Fprintf(&sb, "## %s\n%s\n\n", mem.Key, mem.Content)
 	}
 
 	var summary Summary

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewIndexCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command {
+func NewIndexCmd(rebuildUC *internal.RebuildIndexUseCase, statusUC *internal.IndexStatusUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "index",
 		Short: "Manage the vector search index",
@@ -16,7 +16,7 @@ func NewIndexCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command {
 
 	cmd.AddCommand(
 		newIndexRebuildCmd(rebuildUC),
-		newIndexStatusCmd(),
+		newIndexStatusCmd(statusUC),
 	)
 
 	return cmd
@@ -42,12 +42,33 @@ func newIndexRebuildCmd(rebuildUC *internal.RebuildIndexUseCase) *cobra.Command 
 	return cmd
 }
 
-func newIndexStatusCmd() *cobra.Command {
+func newIndexStatusCmd(statusUC *internal.IndexStatusUseCase) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show index status",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "Index status: use 'mem index rebuild' to build.")
+			scopeHint, _ := cmd.Flags().GetString("scope")
+			jsonOut, _ := cmd.Flags().GetBool("json")
+
+			stats, err := statusUC.Execute(cmd.Context(), internal.IndexStatusInput{Scope: scopeHint})
+			if err != nil {
+				return fmt.Errorf("index status: %w", err)
+			}
+
+			out := cmd.OutOrStdout()
+			if jsonOut {
+				return printJSON(out, stats)
+			}
+
+			if !stats.Exists {
+				fmt.Fprintln(out, "No index built. Run 'mem index rebuild' to build one.")
+				return nil
+			}
+
+			fmt.Fprintf(out, "Path:      %s\n", stats.Path)
+			fmt.Fprintf(out, "Vectors:   %d\n", stats.Vectors)
+			fmt.Fprintf(out, "Dimension: %d\n", stats.Dimension)
+			fmt.Fprintf(out, "Size:      %d bytes\n", stats.SizeBytes)
 			return nil
 		},
 	}

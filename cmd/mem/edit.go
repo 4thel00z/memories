@@ -8,20 +8,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewEditCmd(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryUseCase, commitUC *internal.CommitUseCase) *cobra.Command {
+func NewEditCmd(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <key>",
 		Short: "Edit a memory in $EDITOR",
 		Long:  `Open a memory in your editor. Creates the memory if it doesn't exist. Auto-commits on save.`,
 		Args:  cobra.ExactArgs(1),
-		RunE:  makeEditRunner(getUC, setUC, commitUC),
+		RunE:  makeEditRunner(getUC, setUC),
 	}
 
 	cmd.Flags().StringP("message", "m", "", "Commit message")
 	return cmd
 }
 
-func makeEditRunner(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryUseCase, commitUC *internal.CommitUseCase) func(*cobra.Command, []string) error {
+func makeEditRunner(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 		scopeHint, _ := cmd.Flags().GetString("scope")
@@ -38,14 +38,16 @@ func makeEditRunner(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryU
 		if err != nil {
 			return fmt.Errorf("create temp file: %w", err)
 		}
-		defer os.Remove(tmpFile.Name())
+		defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 		if existing != nil {
 			if _, err := tmpFile.WriteString(existing.Content); err != nil {
 				return fmt.Errorf("write temp file: %w", err)
 			}
 		}
-		tmpFile.Close()
+		if err := tmpFile.Close(); err != nil {
+			return fmt.Errorf("close temp file: %w", err)
+		}
 
 		c := editorCommand(tmpFile.Name())
 		c.Stdin = os.Stdin
@@ -68,12 +70,9 @@ func makeEditRunner(getUC *internal.GetMemoryUseCase, setUC *internal.SetMemoryU
 
 		if err := setUC.Execute(cmd.Context(), internal.SetMemoryInput{
 			Key: key, Content: string(content), Scope: scopeHint,
+			CommitMessage: commitMessage(message, "edit", key),
 		}); err != nil {
 			return fmt.Errorf("save memory: %w", err)
-		}
-
-		if err := autoCommit(cmd.Context(), commitUC, message, "edit", key, scopeHint); err != nil {
-			return fmt.Errorf("commit: %w", err)
 		}
 
 		if existing != nil {

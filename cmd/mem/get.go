@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -50,7 +49,5 @@ func outputGetMemoryJSON(cmd *cobra.Command, out *internal.GetMemoryOutput) erro
 		"updated_at": out.UpdatedAt,
 	}
 
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(data)
+	return printJSON(cmd.OutOrStdout(), data)
 }

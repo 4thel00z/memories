@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,20 +9,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewSetCmd(setUC *internal.SetMemoryUseCase, commitUC *internal.CommitUseCase) *cobra.Command {
+func NewSetCmd(setUC *internal.SetMemoryUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <key> [value]",
 		Short: "Create or update a memory",
 		Long:  `Create or update a memory with the given key. Reads from stdin if value is not provided.`,
 		Args:  cobra.RangeArgs(1, 2),
-		RunE:  makeSetRunner(setUC, commitUC),
+		RunE:  makeSetRunner(setUC),
 	}
 
 	cmd.Flags().StringP("message", "m", "", "Commit message")
 	return cmd
 }
 
-func makeSetRunner(setUC *internal.SetMemoryUseCase, commitUC *internal.CommitUseCase) func(*cobra.Command, []string) error {
+func makeSetRunner(setUC *internal.SetMemoryUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 
@@ -37,12 +36,9 @@ func makeSetRunner(setUC *internal.SetMemoryUseCase, commitUC *internal.CommitUs
 
 		if err := setUC.Execute(cmd.Context(), internal.SetMemoryInput{
 			Key: key, Content: content, Scope: scopeHint,
+			CommitMessage: commitMessage(message, "set", key),
 		}); err != nil {
 			return fmt.Errorf("set memory: %w", err)
-		}
-
-		if err := autoCommit(cmd.Context(), commitUC, message, "set", key, scopeHint); err != nil {
-			return fmt.Errorf("commit: %w", err)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Set %s\n", key)
@@ -62,17 +58,10 @@ func resolveContent(args []string) (string, error) {
 	return string(data), nil
 }
 
-func autoCommit(ctx context.Context, commitUC *internal.CommitUseCase, message, action, key, scopeHint string) error {
-	if commitUC == nil {
-		return nil
+// commitMessage returns the user-provided message, or "<action>: <key>".
+func commitMessage(message, action, key string) string {
+	if message != "" {
+		return message
 	}
-
-	if message == "" {
-		message = fmt.Sprintf("%s: %s", action, key)
-	}
-
-	_, err := commitUC.Execute(ctx, internal.CommitInput{
-		Message: message, Scope: scopeHint,
-	})
-	return err
+	return fmt.Sprintf("%s: %s", action, key)
 }

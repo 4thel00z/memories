@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -41,11 +42,15 @@ func makeCommitRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []s
 		out, err := commitUC.Execute(cmd.Context(), internal.CommitInput{
 			Message: message, Scope: scopeHint,
 		})
+		if errors.Is(err, internal.ErrNothingToCommit) {
+			fmt.Fprintln(cmd.OutOrStdout(), "Nothing to commit.")
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("commit: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", out.Hash[:7], out.Message)
+		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", internal.ShortHash(out.Hash), out.Message)
 		return nil
 	}
 }
@@ -55,12 +60,14 @@ func getMessageFromEditor() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString("\n# Enter commit message above. Lines starting with # are ignored.\n"); err != nil {
 		return "", err
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return "", err
+	}
 
 	c := editorCommand(tmpFile.Name())
 	c.Stdin = os.Stdin

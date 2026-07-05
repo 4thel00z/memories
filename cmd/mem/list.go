@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -59,7 +58,5 @@ func outputListJSON(cmd *cobra.Command, out *internal.ListMemoriesOutput) error 
 		})
 	}
 
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(data)
+	return printJSON(cmd.OutOrStdout(), data)
 }

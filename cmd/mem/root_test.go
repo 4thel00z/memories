@@ -23,7 +23,7 @@ func TestNewRootCmd(t *testing.T) {
 func TestRootCmdHasFlags(t *testing.T) {
 	cmd := NewRootCmd("1.0.0", nil)
 
-	flags := []string{"scope", "branch", "json"}
+	flags := []string{"scope", "json", "debug"}
 	for _, name := range flags {
 		f := cmd.PersistentFlags().Lookup(name)
 		if f == nil {

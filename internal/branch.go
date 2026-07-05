@@ -19,6 +19,14 @@ type Commit struct {
 	Parents   []string
 }
 
+// ShortHash abbreviates a commit hash for display.
+func ShortHash(hash string) string {
+	if len(hash) > 7 {
+		return hash[:7]
+	}
+	return hash
+}
+
 type BranchRepository interface {
 	Current(ctx context.Context) (*Branch, error)
 	ListBranches(ctx context.Context) ([]*Branch, error)

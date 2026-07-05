@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,18 +77,14 @@ func InitRepository(scope Scope) error {
 	storage := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	wt := osfs.New(memPath)
 
-	repo, err := git.Init(storage, wt)
+	// The default branch must be set at init time: go-git points HEAD at
+	// refs/heads/master during Init, and setting init.defaultBranch in the
+	// config afterwards does not re-point it.
+	repo, err := git.InitWithOptions(storage, wt, git.InitOptions{
+		DefaultBranch: plumbing.NewBranchReferenceName(DefaultBranch),
+	})
 	if err != nil {
 		return fmt.Errorf("init repository: %w", err)
-	}
-
-	cfg, err := repo.Config()
-	if err != nil {
-		return fmt.Errorf("get config: %w", err)
-	}
-	cfg.Init.DefaultBranch = DefaultBranch
-	if err := repo.SetConfig(cfg); err != nil {
-		return fmt.Errorf("set config: %w", err)
 	}
 
 	worktree, err := repo.Worktree()
@@ -102,6 +99,17 @@ func InitRepository(scope Scope) error {
 
 	if _, err := worktree.Add(".mem-init"); err != nil {
 		return fmt.Errorf("stage init file: %w", err)
+	}
+
+	// Store machinery is not memory content: keep it out of git status/diff so
+	// a store with only committed memories reads as clean.
+	gitignorePath := filepath.Join(memPath, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("config.yaml\nvectors/\n*.tmp\n"), 0644); err != nil {
+		return fmt.Errorf("write gitignore: %w", err)
+	}
+
+	if _, err := worktree.Add(".gitignore"); err != nil {
+		return fmt.Errorf("stage gitignore: %w", err)
 	}
 
 	_, err = worktree.Commit("init: initialize mem repository", &git.CommitOptions{
@@ -148,16 +156,38 @@ func (r *GitRepository) Get(ctx context.Context, key Key) (*Memory, error) {
 }
 
 func (r *GitRepository) Save(ctx context.Context, mem *Memory) error {
-	path, err := r.keyToPath(mem.Key)
-	if err != nil {
-		return err
-	}
-
 	lock, err := r.lock()
 	if err != nil {
 		return err
 	}
 	defer lock.release()
+
+	return r.saveLocked(mem)
+}
+
+// SaveAndCommit writes a memory and commits it while holding the repository
+// lock once, so a concurrent process cannot slip a write or commit in between.
+// Saving an unchanged value returns (nil, nil) rather than an empty-commit
+// error, making repeated writes of the same content idempotent.
+func (r *GitRepository) SaveAndCommit(ctx context.Context, mem *Memory, message string) (*Commit, error) {
+	lock, err := r.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
+	if err := r.saveLocked(mem); err != nil {
+		return nil, err
+	}
+
+	return r.commitLocked(message)
+}
+
+func (r *GitRepository) saveLocked(mem *Memory) error {
+	path, err := r.keyToPath(mem.Key)
+	if err != nil {
+		return err
+	}
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -188,16 +218,36 @@ func (r *GitRepository) Save(ctx context.Context, mem *Memory) error {
 }
 
 func (r *GitRepository) Delete(ctx context.Context, key Key) error {
-	path, err := r.keyToPath(key)
-	if err != nil {
-		return err
-	}
-
 	lock, err := r.lock()
 	if err != nil {
 		return err
 	}
 	defer lock.release()
+
+	return r.deleteLocked(key)
+}
+
+// DeleteAndCommit removes a memory and commits the removal while holding the
+// repository lock once. See SaveAndCommit for the empty-commit semantics.
+func (r *GitRepository) DeleteAndCommit(ctx context.Context, key Key, message string) (*Commit, error) {
+	lock, err := r.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
+	if err := r.deleteLocked(key); err != nil {
+		return nil, err
+	}
+
+	return r.commitLocked(message)
+}
+
+func (r *GitRepository) deleteLocked(key Key) error {
+	path, err := r.keyToPath(key)
+	if err != nil {
+		return err
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return ErrNotFound
@@ -226,19 +276,22 @@ func (r *GitRepository) List(ctx context.Context, prefix string) ([]*Memory, err
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			if info.Name() == ".git" || info.Name() == "vectors" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Name() == ".mem-init" || info.Name() == "config.yaml" {
-			return nil
-		}
 
 		relPath, err := filepath.Rel(r.memPath, path)
 		if err != nil {
 			return err
+		}
+
+		// Skip only the store's own top-level metadata; a key may legitimately
+		// contain "vectors" or "config.yaml" deeper in its path.
+		if info.IsDir() {
+			if relPath == ".git" || relPath == "vectors" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if IsStoreMetadata(relPath) {
+			return nil
 		}
 
 		// Match prefix on path-component boundaries so "ctx" matches "ctx/foo"
@@ -334,14 +387,26 @@ func (r *GitRepository) ListBranches(ctx context.Context) ([]*Branch, error) {
 }
 
 func (r *GitRepository) Create(ctx context.Context, name string) (*Branch, error) {
+	lock, err := r.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
 	head, err := r.repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("get HEAD: %w", err)
 	}
 
 	refName := plumbing.NewBranchReferenceName(name)
-	ref := plumbing.NewHashReference(refName, head.Hash())
 
+	// SetReference overwrites an existing ref, which would silently force-move
+	// the branch onto the current HEAD. Creating must never move a branch.
+	if _, err := r.repo.Reference(refName, false); err == nil {
+		return nil, fmt.Errorf("%w: %s", ErrBranchExists, name)
+	}
+
+	ref := plumbing.NewHashReference(refName, head.Hash())
 	if err := r.repo.Storer.SetReference(ref); err != nil {
 		return nil, fmt.Errorf("create branch: %w", err)
 	}
@@ -354,6 +419,12 @@ func (r *GitRepository) Create(ctx context.Context, name string) (*Branch, error
 }
 
 func (r *GitRepository) Switch(ctx context.Context, name string) error {
+	lock, err := r.lock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+
 	branchRef := plumbing.NewBranchReferenceName(name)
 
 	if err := r.worktree.Checkout(&git.CheckoutOptions{
@@ -366,6 +437,12 @@ func (r *GitRepository) Switch(ctx context.Context, name string) error {
 }
 
 func (r *GitRepository) DeleteBranch(ctx context.Context, name string) error {
+	lock, err := r.lock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+
 	current, err := r.Current(ctx)
 	if err != nil {
 		return err
@@ -391,6 +468,68 @@ func (r *GitRepository) Commit(ctx context.Context, message string) (*Commit, er
 	}
 	defer lock.release()
 
+	return r.commitLocked(message)
+}
+
+// CommitAll stages every pending memory change in the worktree — including
+// hand edits made outside of mem — and commits them, holding the repository
+// lock once. Store metadata (config, vectors) is never staged. A clean tree
+// returns (nil, nil).
+func (r *GitRepository) CommitAll(ctx context.Context, message string) (*Commit, error) {
+	lock, err := r.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
+	changed, err := r.memoryChanges()
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range changed {
+		if _, err := r.worktree.Add(path); err != nil {
+			return nil, fmt.Errorf("stage %s: %w", path, err)
+		}
+	}
+
+	return r.commitLocked(message)
+}
+
+// memoryChanges returns the worktree-relative paths of pending memory-content
+// changes, excluding store machinery.
+func (r *GitRepository) memoryChanges() ([]string, error) {
+	status, err := r.worktree.Status()
+	if err != nil {
+		return nil, fmt.Errorf("get status: %w", err)
+	}
+
+	var changed []string
+	for path, s := range status {
+		if s.Staging == git.Unmodified && s.Worktree == git.Unmodified {
+			continue
+		}
+		if IsStoreMetadata(path) {
+			continue
+		}
+		changed = append(changed, path)
+	}
+	return changed, nil
+}
+
+// Clean reports whether the store has no pending memory changes. Unlike a
+// full diff, it never reads file contents.
+func (r *GitRepository) Clean(ctx context.Context) (bool, error) {
+	changed, err := r.memoryChanges()
+	if err != nil {
+		return false, err
+	}
+	return len(changed) == 0, nil
+}
+
+// commitLocked commits the index. A clean tree returns (nil, nil) — the
+// no-change contract shared by Commit, SaveAndCommit, DeleteAndCommit, and
+// CommitAll.
+func (r *GitRepository) commitLocked(message string) (*Commit, error) {
 	hash, err := r.worktree.Commit(message, &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  DefaultAuthor,
@@ -399,6 +538,9 @@ func (r *GitRepository) Commit(ctx context.Context, message string) (*Commit, er
 		},
 	})
 	if err != nil {
+		if errors.Is(err, git.ErrEmptyCommit) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
@@ -472,6 +614,11 @@ func (r *GitRepository) diffWorktreeVsHead() (string, error) {
 
 	for path, s := range status {
 		if s.Staging == git.Unmodified && s.Worktree == git.Unmodified {
+			continue
+		}
+		// Pre-.gitignore stores report config/vector files as untracked; they
+		// are store machinery, not memories, and must not dirty the diff.
+		if IsStoreMetadata(path) {
 			continue
 		}
 
@@ -609,19 +756,27 @@ func (r *GitRepository) Show(ctx context.Context, ref string) (*Commit, error) {
 }
 
 func (r *GitRepository) Revert(ctx context.Context, ref string) error {
+	lock, err := r.lock()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+
 	resolved, err := r.repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
 		return fmt.Errorf("resolve ref: %w", err)
 	}
 
-	// Reset is a hard reset that discards uncommitted work. Refuse when the
-	// worktree is dirty so an unsaved/uncommitted memory edit is never silently
-	// destroyed; the caller must commit or stash first.
-	status, err := r.worktree.Status()
+	// Reset is a hard reset that discards uncommitted work. Refuse when there
+	// are pending memory changes so an uncommitted edit is never silently
+	// destroyed. Store metadata is excluded: on stores initialized before the
+	// .gitignore era, untracked config/vector files are permanent and would
+	// otherwise block revert forever.
+	changed, err := r.memoryChanges()
 	if err != nil {
-		return fmt.Errorf("get status: %w", err)
+		return err
 	}
-	if !status.IsClean() {
+	if len(changed) > 0 {
 		return fmt.Errorf("worktree has uncommitted changes; commit or discard them before revert")
 	}
 
@@ -637,9 +792,42 @@ func (r *GitRepository) Revert(ctx context.Context, ref string) error {
 
 // helpers
 
-// lock acquires the per-repository write lock. Mutating operations (Save,
-// Delete, Commit) hold it so concurrent `mem` processes cannot corrupt the
-// go-git index, which lacks git's native index.lock.
+// IsStoreMetadata reports whether a worktree-relative path is store machinery
+// or transient junk rather than memory content. The basename rules cannot
+// shadow real memories: NewKey rejects dot-led segments, "~" characters, and
+// trailing ".tmp".
+func IsStoreMetadata(path string) bool {
+	if path == "config.yaml" || path == ".gitignore" || path == ".mem-init" ||
+		path == ".git" || strings.HasPrefix(path, ".git/") ||
+		path == "vectors" || strings.HasPrefix(path, "vectors/") {
+		return true
+	}
+
+	// Atomic-write temp files and editor artifacts (vim swap, backup files).
+	base := path[strings.LastIndexByte(path, '/')+1:]
+	return strings.HasPrefix(base, ".") || strings.HasSuffix(base, "~") || strings.HasSuffix(base, ".tmp")
+}
+
+// HeadBranch returns the store's current branch name by reading the HEAD file
+// directly, without the cost of opening the repository. Returns "" when the
+// store is missing or HEAD is detached.
+func HeadBranch(scope Scope) string {
+	data, err := os.ReadFile(filepath.Join(scope.MemPath, ".git", "HEAD"))
+	if err != nil {
+		return ""
+	}
+	const prefix = "ref: refs/heads/"
+	ref := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(ref, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(ref, prefix)
+}
+
+// lock acquires the per-repository write lock. All mutating operations (Save,
+// Delete, Commit, Create, Switch, DeleteBranch, Revert) hold it so concurrent
+// `mem` processes cannot corrupt the go-git index, which lacks git's native
+// index.lock.
 func (r *GitRepository) lock() (*fileLock, error) {
 	return acquireLock(filepath.Join(r.memPath, ".git"), 10*time.Second)
 }

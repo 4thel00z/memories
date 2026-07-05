@@ -11,7 +11,7 @@ import (
 	"github.com/4thel00z/memories/internal"
 )
 
-func setupEditTest(t *testing.T) (*internal.GitRepository, *internal.GetMemoryUseCase, *internal.SetMemoryUseCase, *internal.CommitUseCase) {
+func setupEditTest(t *testing.T) (*internal.GitRepository, *internal.GetMemoryUseCase, *internal.SetMemoryUseCase) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	scope := internal.Scope{
@@ -34,18 +34,16 @@ func setupEditTest(t *testing.T) (*internal.GitRepository, *internal.GetMemoryUs
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
 	getUC := internal.NewGetMemoryUseCase(resolver, repoFor)
 	setUC := internal.NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
-	commitUC := internal.NewCommitUseCase(resolver, histFor)
 
-	return repo, getUC, setUC, commitUC
+	return repo, getUC, setUC
 }
 
 func TestEditCmdCreatesNew(t *testing.T) {
-	repo, getUC, setUC, commitUC := setupEditTest(t)
+	repo, getUC, setUC := setupEditTest(t)
 
 	// Use a script that writes content to the file as the "editor"
 	editorScript := filepath.Join(t.TempDir(), "editor.sh")
@@ -54,7 +52,7 @@ func TestEditCmdCreatesNew(t *testing.T) {
 	}
 	t.Setenv("EDITOR", editorScript)
 
-	cmd := NewEditCmd(getUC, setUC, commitUC)
+	cmd := NewEditCmd(getUC, setUC)
 	cmd.SetArgs([]string{"new/edited"})
 
 	var out bytes.Buffer
@@ -79,7 +77,7 @@ func TestEditCmdCreatesNew(t *testing.T) {
 }
 
 func TestEditCmdUpdatesExisting(t *testing.T) {
-	repo, getUC, setUC, commitUC := setupEditTest(t)
+	repo, getUC, setUC := setupEditTest(t)
 
 	// Create initial memory
 	key, _ := internal.NewKey("existing/edit")
@@ -103,7 +101,7 @@ func TestEditCmdUpdatesExisting(t *testing.T) {
 	}
 	t.Setenv("EDITOR", editorScript)
 
-	cmd := NewEditCmd(getUC, setUC, commitUC)
+	cmd := NewEditCmd(getUC, setUC)
 	cmd.SetArgs([]string{"existing/edit"})
 
 	var out bytes.Buffer
@@ -128,7 +126,7 @@ func TestEditCmdUpdatesExisting(t *testing.T) {
 }
 
 func TestEditCmdNoChanges(t *testing.T) {
-	repo, getUC, setUC, commitUC := setupEditTest(t)
+	repo, getUC, setUC := setupEditTest(t)
 
 	// Create initial memory
 	key, _ := internal.NewKey("nochange")
@@ -152,7 +150,7 @@ func TestEditCmdNoChanges(t *testing.T) {
 	}
 	t.Setenv("EDITOR", editorScript)
 
-	cmd := NewEditCmd(getUC, setUC, commitUC)
+	cmd := NewEditCmd(getUC, setUC)
 	cmd.SetArgs([]string{"nochange"})
 
 	var out bytes.Buffer

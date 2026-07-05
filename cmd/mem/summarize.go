@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -38,9 +37,7 @@ func makeSummarizeRunner(summarizeUC *internal.SummarizeUseCase) func(*cobra.Com
 		}
 
 		if asJSON {
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			return enc.Encode(out)
+			return printJSON(cmd.OutOrStdout(), out)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n%s\n", out.Title, out.Overview)

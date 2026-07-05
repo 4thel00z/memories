@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,8 +55,9 @@ func TestSetAndGetUseCase(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 
-	if _, err := commitUC.Execute(ctx, CommitInput{Message: "test: set uc/key"}); err != nil {
-		t.Fatalf("commit: %v", err)
+	// Set commits atomically, so an explicit commit right after is a no-op.
+	if _, err := commitUC.Execute(ctx, CommitInput{Message: "test: set uc/key"}); !errors.Is(err, ErrNothingToCommit) {
+		t.Fatalf("commit after set = %v, want ErrNothingToCommit", err)
 	}
 
 	out, err := getUC.Execute(ctx, GetMemoryInput{Key: "uc/key"})
@@ -73,19 +75,14 @@ func TestDeleteUseCase(t *testing.T) {
 	ctx := context.Background()
 
 	repoFor := func(s Scope) (MemoryRepository, error) { return repo, nil }
-	histFor := func(s Scope) (HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s Scope) (VectorIndex, error) { return nil, ErrNoIndex }
 
 	setUC := NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
 	delUC := NewDeleteMemoryUseCase(resolver, repoFor, nilIndex)
 	getUC := NewGetMemoryUseCase(resolver, repoFor)
-	commitUC := NewCommitUseCase(resolver, histFor)
 
 	if err := setUC.Execute(ctx, SetMemoryInput{Key: "del-me", Content: "bye"}); err != nil {
 		t.Fatalf("set: %v", err)
-	}
-	if _, err := commitUC.Execute(ctx, CommitInput{Message: "test: set"}); err != nil {
-		t.Fatalf("commit: %v", err)
 	}
 
 	if err := delUC.Execute(ctx, DeleteMemoryInput{Key: "del-me"}); err != nil {
@@ -103,20 +100,15 @@ func TestListUseCase(t *testing.T) {
 	ctx := context.Background()
 
 	repoFor := func(s Scope) (MemoryRepository, error) { return repo, nil }
-	histFor := func(s Scope) (HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s Scope) (VectorIndex, error) { return nil, ErrNoIndex }
 
 	setUC := NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
 	listUC := NewListMemoriesUseCase(resolver, repoFor)
-	commitUC := NewCommitUseCase(resolver, histFor)
 
 	for _, key := range []string{"ns/a", "ns/b", "other/c"} {
 		if err := setUC.Execute(ctx, SetMemoryInput{Key: key, Content: "val"}); err != nil {
 			t.Fatalf("set %s: %v", key, err)
 		}
-	}
-	if _, err := commitUC.Execute(ctx, CommitInput{Message: "test: set all"}); err != nil {
-		t.Fatalf("commit: %v", err)
 	}
 
 	all, err := listUC.Execute(ctx, ListMemoriesInput{})
@@ -154,16 +146,15 @@ func TestCommitAndLogUseCase(t *testing.T) {
 	repo, resolver := setupUseCaseTest(t)
 	ctx := context.Background()
 
-	repoFor := func(s Scope) (MemoryRepository, error) { return repo, nil }
 	histFor := func(s Scope) (HistoryRepository, error) { return repo, nil }
-	nilIndex := func(s Scope) (VectorIndex, error) { return nil, ErrNoIndex }
 
-	setUC := NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
 	commitUC := NewCommitUseCase(resolver, histFor)
 	logUC := NewLogUseCase(resolver, histFor)
 
-	if err := setUC.Execute(ctx, SetMemoryInput{Key: "logged", Content: "data"}); err != nil {
-		t.Fatalf("set: %v", err)
+	// Stage without committing so CommitUseCase has real work to do.
+	key, _ := NewKey("logged")
+	if err := repo.Save(ctx, NewMemory(key, []byte("data"))); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 
 	commit, err := commitUC.Execute(ctx, CommitInput{Message: "test: usecase commit"})
@@ -196,11 +187,9 @@ func TestKeywordSearchUseCase(t *testing.T) {
 	ctx := context.Background()
 
 	repoFor := func(s Scope) (MemoryRepository, error) { return repo, nil }
-	histFor := func(s Scope) (HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s Scope) (VectorIndex, error) { return nil, ErrNoIndex }
 
 	setUC := NewSetMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
-	commitUC := NewCommitUseCase(resolver, histFor)
 	searchUC := NewKeywordSearchUseCase(resolver, repoFor)
 
 	if err := setUC.Execute(ctx, SetMemoryInput{Key: "haystack", Content: "needle in the content"}); err != nil {
@@ -208,9 +197,6 @@ func TestKeywordSearchUseCase(t *testing.T) {
 	}
 	if err := setUC.Execute(ctx, SetMemoryInput{Key: "other", Content: "nothing here"}); err != nil {
 		t.Fatalf("set: %v", err)
-	}
-	if _, err := commitUC.Execute(ctx, CommitInput{Message: "test: setup"}); err != nil {
-		t.Fatalf("commit: %v", err)
 	}
 
 	out, err := searchUC.Execute(ctx, SearchInput{Query: "needle"})

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,8 +117,10 @@ func TestCommitCmdEmptyWorktree(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error for empty worktree commit")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("empty worktree commit must be a no-op, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "Nothing to commit.") {
+		t.Errorf("expected no-op message, got %q", out.String())
 	}
 }

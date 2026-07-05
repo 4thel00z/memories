@@ -83,7 +83,7 @@ func (p *FantasyProvider) Complete(ctx context.Context, prompt string) (string, 
 
 func (p *FantasyProvider) GenerateObject(ctx context.Context, prompt string, target any) error {
 	t := reflect.TypeOf(target)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -100,7 +100,7 @@ func (p *FantasyProvider) GenerateObject(ctx context.Context, prompt string, tar
 	}
 
 	targetVal := reflect.ValueOf(target)
-	if targetVal.Kind() != reflect.Ptr {
+	if targetVal.Kind() != reflect.Pointer {
 		return fmt.Errorf("target must be a pointer")
 	}
 

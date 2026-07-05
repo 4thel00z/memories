@@ -118,14 +118,25 @@ func newApp(debug bool) *app {
 		return idx, nil
 	}
 
+	// Same lazy pattern as the embedder: the provider is only constructed (and
+	// config only consulted) when an AI feature actually makes an LLM call.
+	provider := newLazyProvider(func(ctx context.Context) (internal.Provider, error) {
+		return internal.ResolveProvider(ctx, resolver)
+	})
+
 	setMemoryUC := internal.NewSetMemoryUseCase(resolver, repoFor, indexFor, embedder, nil)
 	rebuildIndexUC := internal.NewRebuildIndexUseCase(resolver, repoFor, indexFor, embedder)
 
 	// SetMemory keeps the vector index in sync incrementally, so the hook needs
 	// no separate reindex pass. scope is the store the hook config was resolved
 	// from, so the commit memory lands there and not wherever Resolve("") picks.
+	// The CommitMessage makes each hook write a durable commit instead of
+	// leaving the store with staged, uncommitted changes.
 	hookStoreFn := func(ctx context.Context, scope, key, content string) error {
-		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{Key: key, Content: content, Scope: scope})
+		return setMemoryUC.Execute(ctx, internal.SetMemoryInput{
+			Key: key, Content: content, Scope: scope,
+			CommitMessage: fmt.Sprintf("hook: %s", key),
+		})
 	}
 
 	uc := &internal.UseCases{
@@ -133,8 +144,7 @@ func newApp(debug bool) *app {
 		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
 		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, indexFor),
 		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
-		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, indexFor, embedder, nil),
-		EditMemory:     internal.NewEditMemoryUseCase(resolver, repoFor, histFor, indexFor, embedder, nil),
+		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, indexFor, embedder, nil),
 		Commit:         internal.NewCommitUseCase(resolver, histFor),
 		Log:            internal.NewLogUseCase(resolver, histFor),
 		Diff:           internal.NewDiffUseCase(resolver, histFor),
@@ -142,8 +152,9 @@ func newApp(debug bool) *app {
 		KeywordSearch:  internal.NewKeywordSearchUseCase(resolver, repoFor),
 		SemanticSearch: internal.NewSemanticSearchUseCase(resolver, indexFor, embedder),
 		RebuildIndex:   rebuildIndexUC,
-		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, nil),
-		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, nil),
+		IndexStatus:    internal.NewIndexStatusUseCase(resolver),
+		Summarize:      internal.NewSummarizeUseCase(resolver, repoFor, provider),
+		AutoTag:        internal.NewAutoTagUseCase(resolver, repoFor, provider),
 		BranchCurrent:  internal.NewBranchCurrentUseCase(resolver, branchFor),
 		BranchList:     internal.NewBranchListUseCase(resolver, branchFor),
 		BranchCreate:   internal.NewBranchCreateUseCase(resolver, branchFor),
@@ -156,7 +167,7 @@ func newApp(debug bool) *app {
 		ProviderTest:   internal.NewProviderTestUseCase(resolver),
 		InstallHook:    internal.NewInstallHookUseCase(resolver),
 		UninstallHook:  internal.NewUninstallHookUseCase(resolver),
-		RunHook:        internal.NewRunHookUseCase(resolver, nil, hookStoreFn),
+		RunHook:        internal.NewRunHookUseCase(resolver, provider, hookStoreFn),
 	}
 
 	return &app{

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/4thel00z/memories/internal"
@@ -41,7 +40,7 @@ func makeLogRunner(logUC *internal.LogUseCase) func(*cobra.Command, []string) er
 
 		for _, c := range out.Commits {
 			if oneline {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", c.Hash[:7], c.Message)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", internal.ShortHash(c.Hash), c.Message)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "commit %s\n", c.Hash)
 				fmt.Fprintf(cmd.OutOrStdout(), "Date:   %s\n\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
@@ -62,7 +61,5 @@ func outputCommitsJSON(cmd *cobra.Command, commits []internal.CommitOutput) erro
 		})
 	}
 
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return printJSON(cmd.OutOrStdout(), out)
 }

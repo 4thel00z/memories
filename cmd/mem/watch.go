@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,19 +41,19 @@ func makeWatchRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []st
 		if err != nil {
 			return fmt.Errorf("create watcher: %w", err)
 		}
-		defer watcher.Close()
+		defer func() { _ = watcher.Close() }()
 
-		if err := addWatchDirs(watcher, scope.Path); err != nil {
+		if err := addWatchDirs(watcher, scope.MemPath); err != nil {
 			return fmt.Errorf("add watch dirs: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Watching %s for changes...\n", scope.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "Watching %s for changes...\n", scope.MemPath)
 
-		timer := time.NewTimer(0)
-		if !timer.Stop() {
-			<-timer.C
-		}
-		pending := false
+		// Start with one debounce window pending so changes made while watch
+		// was not running are committed on startup instead of sitting dirty
+		// until the next event.
+		timer := time.NewTimer(debounce)
+		pending := true
 
 		for {
 			select {
@@ -64,6 +65,13 @@ func makeWatchRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []st
 				}
 				if shouldIgnoreEvent(event, scope.MemPath) {
 					continue
+				}
+				// fsnotify does not watch recursively; pick up new key
+				// directories as they appear.
+				if event.Op&fsnotify.Create != 0 {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						_ = watcher.Add(event.Name)
+					}
 				}
 				if !pending {
 					timer.Reset(debounce)
@@ -79,15 +87,21 @@ func makeWatchRunner(commitUC *internal.CommitUseCase) func(*cobra.Command, []st
 				out, commitErr := commitUC.Execute(cmd.Context(), internal.CommitInput{
 					Message: "auto: watch commit", Scope: scopeHint,
 				})
-				if commitErr != nil {
+				if errors.Is(commitErr, internal.ErrNothingToCommit) {
 					continue
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", out.Hash[:7], out.Message)
+				if commitErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "watch commit: %v\n", commitErr)
+					continue
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", internal.ShortHash(out.Hash), out.Message)
 			}
 		}
 	}
 }
 
+// addWatchDirs registers the store's key directories, skipping git internals
+// and the vector index.
 func addWatchDirs(watcher *fsnotify.Watcher, root string) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -96,7 +110,7 @@ func addWatchDirs(watcher *fsnotify.Watcher, root string) error {
 
 		if info.IsDir() {
 			base := filepath.Base(path)
-			if strings.HasPrefix(base, ".") && path != root {
+			if path != root && (strings.HasPrefix(base, ".") || path == filepath.Join(root, "vectors")) {
 				return filepath.SkipDir
 			}
 			return watcher.Add(path)
@@ -105,14 +119,16 @@ func addWatchDirs(watcher *fsnotify.Watcher, root string) error {
 	})
 }
 
+// shouldIgnoreEvent filters events down to memory content, using the same
+// store-metadata definition as status, diff, and commit.
 func shouldIgnoreEvent(event fsnotify.Event, memPath string) bool {
-	if strings.HasPrefix(event.Name, memPath) {
+	rel, err := filepath.Rel(memPath, event.Name)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return true
+	}
+	if internal.IsStoreMetadata(filepath.ToSlash(rel)) {
 		return true
 	}
 
-	if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0 {
-		return true
-	}
-
-	return false
+	return event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0
 }

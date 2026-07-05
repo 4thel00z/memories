@@ -48,7 +48,7 @@ func TestIgnoreMatcherExactPattern(t *testing.T) {
 func TestIgnoreMatcherGlobPattern(t *testing.T) {
 	tmpDir := t.TempDir()
 	ignoreFile := filepath.Join(tmpDir, IgnoreFilename)
-	if err := os.WriteFile(ignoreFile, []byte("*.tmp\n"), 0644); err != nil {
+	if err := os.WriteFile(ignoreFile, []byte("*.bak\n"), 0644); err != nil {
 		t.Fatalf("write ignore file: %v", err)
 	}
 
@@ -58,14 +58,14 @@ func TestIgnoreMatcherGlobPattern(t *testing.T) {
 		t.Fatalf("new matcher: %v", err)
 	}
 
-	key, _ := NewKey("data.tmp")
+	key, _ := NewKey("data.bak")
 	if !m.MatchKey(key) {
-		t.Error("expected '*.tmp' pattern to match 'data.tmp'")
+		t.Error("expected '*.bak' pattern to match 'data.bak'")
 	}
 
 	key2, _ := NewKey("data.txt")
 	if m.MatchKey(key2) {
-		t.Error("expected '*.tmp' pattern to not match 'data.txt'")
+		t.Error("expected '*.bak' pattern to not match 'data.txt'")
 	}
 }
 

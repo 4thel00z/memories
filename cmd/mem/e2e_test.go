@@ -51,7 +51,7 @@ func setupE2E(t *testing.T) (*app, *internal.GitRepository) {
 		GetMemory:      internal.NewGetMemoryUseCase(resolver, repoFor),
 		DeleteMemory:   internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex),
 		ListMemories:   internal.NewListMemoriesUseCase(resolver, repoFor),
-		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, histFor, nilIndex, nil, nil),
+		AddMemory:      internal.NewAddMemoryUseCase(resolver, repoFor, nilIndex, nil, nil),
 		Commit:         internal.NewCommitUseCase(resolver, histFor),
 		Log:            internal.NewLogUseCase(resolver, histFor),
 		Diff:           internal.NewDiffUseCase(resolver, histFor),

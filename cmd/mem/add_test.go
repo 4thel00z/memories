@@ -34,10 +34,9 @@ func setupAddTest(t *testing.T) (*internal.GitRepository, *internal.AddMemoryUse
 
 	resolver := internal.NewScopeResolver()
 	repoFor := func(s internal.Scope) (internal.MemoryRepository, error) { return repo, nil }
-	histFor := func(s internal.Scope) (internal.HistoryRepository, error) { return repo, nil }
 	nilIndex := func(s internal.Scope) (internal.VectorIndex, error) { return nil, internal.ErrNoIndex }
 
-	addUC := internal.NewAddMemoryUseCase(resolver, repoFor, histFor, nilIndex, nil, nil)
+	addUC := internal.NewAddMemoryUseCase(resolver, repoFor, nilIndex, nil, nil)
 
 	return repo, addUC
 }

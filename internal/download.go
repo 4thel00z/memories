@@ -78,7 +78,7 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: status %d", resp.StatusCode)
@@ -99,11 +99,11 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	closeErr := f.Close()
 
 	if err != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return fmt.Errorf("write file: %w", err)
 	}
 	if closeErr != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return fmt.Errorf("close file: %w", closeErr)
 	}
 
@@ -112,12 +112,12 @@ func (d *Downloader) download(ctx context.Context, url, dest string, onProgress 
 	// require the written bytes to match it before trusting the file. Without
 	// this, a partial .gguf is renamed into place and cached forever.
 	if resp.ContentLength >= 0 && pw.Written != resp.ContentLength {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return fmt.Errorf("incomplete download: got %d bytes, expected %d", pw.Written, resp.ContentLength)
 	}
 
 	if err := os.Rename(tmpFile, dest); err != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return fmt.Errorf("rename file: %w", err)
 	}
 

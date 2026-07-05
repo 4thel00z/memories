@@ -69,7 +69,12 @@ func gatherCommitContext() (*internal.CommitContext, error) {
 
 	diff, err := gitOutput("diff", "HEAD~1..HEAD")
 	if err != nil {
-		diff = ""
+		// Root commit: HEAD~1 does not exist. Diff against the empty tree so
+		// the first commit in a repository still produces a memory.
+		diff, err = gitOutput("diff-tree", "--root", "--no-commit-id", "-p", "HEAD")
+		if err != nil {
+			diff = ""
+		}
 	}
 
 	return &internal.CommitContext{

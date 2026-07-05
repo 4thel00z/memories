@@ -7,21 +7,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewDelCmd(delUC *internal.DeleteMemoryUseCase, commitUC *internal.CommitUseCase) *cobra.Command {
+func NewDelCmd(delUC *internal.DeleteMemoryUseCase) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "del <key>",
 		Aliases: []string{"delete", "rm"},
 		Short:   "Delete a memory",
 		Long:    `Delete a memory by key.`,
 		Args:    cobra.ExactArgs(1),
-		RunE:    makeDelRunner(delUC, commitUC),
+		RunE:    makeDelRunner(delUC),
 	}
 
 	cmd.Flags().StringP("message", "m", "", "Commit message")
 	return cmd
 }
 
-func makeDelRunner(delUC *internal.DeleteMemoryUseCase, commitUC *internal.CommitUseCase) func(*cobra.Command, []string) error {
+func makeDelRunner(delUC *internal.DeleteMemoryUseCase) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 		scopeHint, _ := cmd.Flags().GetString("scope")
@@ -29,12 +29,9 @@ func makeDelRunner(delUC *internal.DeleteMemoryUseCase, commitUC *internal.Commi
 
 		if err := delUC.Execute(cmd.Context(), internal.DeleteMemoryInput{
 			Key: key, Scope: scopeHint,
+			CommitMessage: commitMessage(message, "del", key),
 		}); err != nil {
 			return fmt.Errorf("delete memory: %w", err)
-		}
-
-		if err := autoCommit(cmd.Context(), commitUC, message, "del", key, scopeHint); err != nil {
-			return fmt.Errorf("commit: %w", err)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s\n", key)
