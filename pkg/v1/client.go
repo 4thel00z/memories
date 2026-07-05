@@ -3,6 +3,8 @@ package v1
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/4thel00z/memories/internal"
 )
@@ -11,6 +13,50 @@ import (
 type Client struct {
 	uc    *internal.UseCases
 	scope string
+}
+
+// Init creates a memory store: ./.mem in the working directory by default, or
+// ~/.mem with WithScope("global"). An already-initialized store is a no-op, so
+// Init is safe to call before every New.
+func Init(opts ...Option) error {
+	cfg := &clientConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	resolver := internal.NewScopeResolver()
+
+	var scope internal.Scope
+	if cfg.scope == "global" {
+		scope = resolver.Global()
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		scope = internal.Scope{
+			Type:    internal.ScopeProject,
+			Path:    cwd,
+			MemPath: filepath.Join(cwd, ".mem"),
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(scope.MemPath, ".git")); err == nil {
+		return nil
+	}
+
+	if err := os.MkdirAll(scope.VectorPath(), 0755); err != nil {
+		return fmt.Errorf("create vectors directory: %w", err)
+	}
+	if err := internal.InitRepository(scope); err != nil {
+		return fmt.Errorf("init repository: %w", err)
+	}
+	if _, err := os.Stat(scope.ConfigPath()); os.IsNotExist(err) {
+		if err := internal.SaveConfig(scope, internal.DefaultConfig()); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+	return nil
 }
 
 // New creates a new Client with the given options.
@@ -36,9 +82,6 @@ func New(opts ...Option) (*Client, error) {
 	repoFor := func(scope internal.Scope) (internal.MemoryRepository, error) {
 		return internal.NewGitRepository(scope)
 	}
-	histFor := func(scope internal.Scope) (internal.HistoryRepository, error) {
-		return internal.NewGitRepository(scope)
-	}
 
 	nilIndex := func(scope internal.Scope) (internal.VectorIndex, error) {
 		return nil, internal.ErrNoIndex
@@ -49,7 +92,6 @@ func New(opts ...Option) (*Client, error) {
 		GetMemory:    internal.NewGetMemoryUseCase(resolver, repoFor),
 		DeleteMemory: internal.NewDeleteMemoryUseCase(resolver, repoFor, nilIndex),
 		ListMemories: internal.NewListMemoriesUseCase(resolver, repoFor),
-		Commit:       internal.NewCommitUseCase(resolver, histFor),
 	}
 
 	return &Client{
@@ -58,20 +100,14 @@ func New(opts ...Option) (*Client, error) {
 	}, nil
 }
 
-// Set creates or updates a memory.
+// Set creates or updates a memory. The write and its commit happen under one
+// repository lock, and re-setting an unchanged value is a no-op.
 func (c *Client) Set(ctx context.Context, key string, value []byte) error {
 	if err := c.uc.SetMemory.Execute(ctx, internal.SetMemoryInput{
 		Key: key, Content: string(value), Scope: c.scope,
+		CommitMessage: fmt.Sprintf("set: %s", key),
 	}); err != nil {
 		return fmt.Errorf("set: %w", err)
-	}
-
-	if _, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
-		Message: fmt.Sprintf("set: %s", key), Scope: c.scope,
-	}); err != nil {
-		// The write is already staged on disk; surface that the commit failed so
-		// the caller knows the store has an uncommitted change to reconcile.
-		return fmt.Errorf("set: wrote %q but commit failed (change left uncommitted): %w", key, err)
 	}
 	return nil
 }
@@ -87,18 +123,14 @@ func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 	return []byte(out.Content), nil
 }
 
-// Delete removes a memory.
+// Delete removes a memory. The removal and its commit happen under one
+// repository lock.
 func (c *Client) Delete(ctx context.Context, key string) error {
 	if err := c.uc.DeleteMemory.Execute(ctx, internal.DeleteMemoryInput{
 		Key: key, Scope: c.scope,
+		CommitMessage: fmt.Sprintf("del: %s", key),
 	}); err != nil {
 		return fmt.Errorf("delete: %w", err)
-	}
-
-	if _, err := c.uc.Commit.Execute(ctx, internal.CommitInput{
-		Message: fmt.Sprintf("del: %s", key), Scope: c.scope,
-	}); err != nil {
-		return fmt.Errorf("delete: removed %q but commit failed (change left uncommitted): %w", key, err)
 	}
 	return nil
 }

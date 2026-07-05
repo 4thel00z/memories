@@ -36,13 +36,13 @@ func setupClientTest(t *testing.T) *Client {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
+	t.Cleanup(func() { _ = client.Close() })
 
 	return client
 }
 
 func TestClientSetAndGet(t *testing.T) {
 	client := setupClientTest(t)
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -62,7 +62,6 @@ func TestClientSetAndGet(t *testing.T) {
 
 func TestClientDelete(t *testing.T) {
 	client := setupClientTest(t)
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -82,7 +81,6 @@ func TestClientDelete(t *testing.T) {
 
 func TestClientList(t *testing.T) {
 	client := setupClientTest(t)
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -111,7 +109,6 @@ func TestClientList(t *testing.T) {
 
 func TestClientGetNotFound(t *testing.T) {
 	client := setupClientTest(t)
-	defer client.Close()
 
 	_, err := client.Get(context.Background(), "nonexistent")
 	if err == nil {
@@ -121,10 +118,36 @@ func TestClientGetNotFound(t *testing.T) {
 
 func TestClientInvalidKey(t *testing.T) {
 	client := setupClientTest(t)
-	defer client.Close()
 
 	err := client.Set(context.Background(), "", []byte("x"))
 	if err == nil {
 		t.Error("expected error for empty key")
+	}
+}
+
+func TestInit(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	if err := Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Init is idempotent: a second call on an existing store is a no-op.
+	if err := Init(); err != nil {
+		t.Fatalf("second init: %v", err)
+	}
+
+	client, err := New()
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	ctx := context.Background()
+	if err := client.Set(ctx, "boot/key", []byte("v")); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, err := client.Get(ctx, "boot/key")
+	if err != nil || string(got) != "v" {
+		t.Fatalf("get = %q, %v", got, err)
 	}
 }
